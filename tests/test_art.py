@@ -36,3 +36,19 @@ def test_pick_mixes_screenshots_and_art():
     used = []
     kinds = [art.pick("", index, used)["id"][:2] for _ in range(40)]
     assert 8 <= kinds.count("gp") <= 32
+
+
+def test_frames_never_repeat():
+    index = [{"id": f"yt-v{v}-{n}", "video": f"v{v}", "title": "", "path": f"v{v}-{n}"}
+             for v in range(3) for n in (1, 2, 3)]
+    used = []
+    picked = [art.pick("", index, used)["id"] for _ in range(9)]
+    assert len(set(picked)) == 9  # Все кадры разные.
+    assert art.pick("", index, used) is None  # Кадры кончились: лучше градиент, чем повтор.
+    assert all(art.video_of(a) != art.video_of(b) for a, b in zip(picked, picked[1:3]))
+
+
+def test_album_videos_are_not_used_on_covers():
+    index = [{"id": "yt-album-1", "video": "album", "title": "", "path": "a"},
+             {"id": "yt-free-1", "video": "free", "title": "", "path": "f"}]
+    assert art.pick("", index, [], banned_videos={"album"})["path"] == "f"

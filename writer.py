@@ -265,7 +265,8 @@ def draw(path, args, topic=""):
     import random
 
     share = float(os.environ.get("SCREENSHOT_SHARE", "0.5"))  # 1 = только скриншоты из игры.
-    background = art.pick(topic, BACKGROUNDS["index"], BACKGROUNDS["used"], share)
+    albums = set(bot.read_json(ROOT / "albums_used.json", []))  # Кадры из альбомов артов на обложки не берём.
+    background = art.pick(topic, BACKGROUNDS["index"], BACKGROUNDS["used"], share, albums)
     extra = []
     if background:
         layouts = [l for l in ("left", "bottom", "center") if l != LAST_LAYOUT[0]]
@@ -497,6 +498,8 @@ def balance_tables(config, count):
 def art_albums(count, posts):
     """Альбомы артов: по 3 кадра из одного официального мультфильма Brawl Stars."""
     used = {p.get("album_video") for p in posts} | set(bot.read_json(ROOT / "albums_used.json", []))
+    # Ролик, кадр которого уже был на обложке, в альбом не берём: картинка повторилась бы.
+    used |= {art.video_of(i)[3:] for i in BACKGROUNDS["used"] if i.startswith("yt-")}
     by_video = {}
     for item in BACKGROUNDS["index"]:
         if item["id"].startswith("yt-"):  # Только официальный канал, не скриншоты ютуберов.
@@ -514,6 +517,7 @@ def art_albums(count, posts):
                 f"{styles.pick(styles.ART_CTAS)}\n\n#BrawlStars #арт")
         images = [f"https://i.ytimg.com/vi/{video}/maxres{f['id'].rsplit('-', 1)[1]}.jpg"
                   for f in sorted(frames, key=lambda f: f["id"])]
+        BACKGROUNDS["used"].extend(f["id"] for f in frames)  # Кадры альбома больше нигде не появятся.
         albums.append({"type": "album", "images": images, "text": text, "kind": "art", "album_video": video,
                        "source": url, "source_name": "YouTube: Brawl Stars"})
     return albums

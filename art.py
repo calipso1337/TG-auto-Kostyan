@@ -123,7 +123,7 @@ def blog_art(blog_url, limit):
     return items
 
 
-def gameplay_art(channel, limit=8):
+def gameplay_art(channel, limit=15):
     """Скриншоты из самой игры: кадры геймплейных роликов ютуберов (только русские ролики, без Shorts)."""
     videos = sources.parse_youtube(sources.get(
         f"https://www.youtube.com/feeds/videos.xml?channel_id={channel['channel_id']}"))
@@ -194,26 +194,35 @@ def load():
     return json.loads(INDEX.read_text(encoding="utf-8")) if INDEX.exists() else []
 
 
-RECENT = 60  # Фон не повторяется, пока не пройдут столько других обложек.
+MEMORY = 5000  # Сколько использованных кадров помнить: по сути навсегда.
+SAME_VIDEO_GAP = 8  # Кадры одного ролика не ставим на обложки чаще, чем раз в столько постов.
 
 
-def pick(text, index, used, screenshot_share=0.5):
-    """Фон для поста ({path, credit, ...}) или None. used: список id, обновляется.
+def video_of(frame_id):
+    return frame_id.rsplit("-", 1)[0]
 
+
+def pick(text, index, used, screenshot_share=0.5, banned_videos=()):
+    """Фон для поста ({path, credit, ...}) или None, если свежих кадров не осталось.
+
+    Кадр, который уже был на обложке или в альбоме, больше не берётся никогда (used: список id).
+    Кадры одного ролика не идут на соседние обложки, ролики из альбомов артов не берутся.
     Примерно половина обложек на скриншотах из игры, половина на арте из мультфильмов."""
     import random
 
-    if not index:
+    taken = set(used)
+    near = {video_of(i) for i in used[-SAME_VIDEO_GAP:]}
+    fresh = [item for item in index if item["id"] not in taken and item.get("video") not in banned_videos]
+    if not fresh:
+        print("Свежих кадров не осталось: обложка будет на градиенте")
         return None
-    screens = [item for item in index if item["id"].startswith("gp-")]
-    arts = [item for item in index if not item["id"].startswith("gp-")]
+    spaced = [item for item in fresh if video_of(item["id"]) not in near] or fresh
+    screens = [item for item in spaced if item["id"].startswith("gp-")]
+    arts = [item for item in spaced if not item["id"].startswith("gp-")]
     if screens and arts:
-        index = screens if random.random() < screenshot_share else arts
-    recent = set(used[-min(RECENT, max(len(index) - 1, 0)):])
-    fresh = [item for item in index if item["id"] not in recent] or index
+        spaced = screens if random.random() < screenshot_share else arts
     topic = words(text)
-    counts = {item["id"]: used.count(item["id"]) for item in index}
-    best = max(fresh, key=lambda item: (len(topic & words(item["title"])), -counts[item["id"]], random.random()))
+    best = max(spaced, key=lambda item: (len(topic & words(item["title"])), random.random()))
     used.append(best["id"])
-    del used[:-300]
+    del used[:-MEMORY]
     return best

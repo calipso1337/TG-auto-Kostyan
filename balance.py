@@ -17,6 +17,7 @@ import sources
 PROMPT = """Ниже текст официальных патчноутов Brawl Stars с сайта Supercell. Выбери ОДНОГО бойца,
 у которого больше всего изменений баланса с конкретными числами, и разложи их по строкам.
 Бери числа ТОЛЬКО из текста, ничего не придумывай и не пересчитывай.
+Не бери этих бойцов, по ним таблицы уже были: {exclude}.
 
 Ответь только JSON без пояснений:
 {{"brawler": "имя бойца как в тексте", "brawler_ru": "имя по-русски, как в русской версии игры",
@@ -94,10 +95,10 @@ def table_data(answer, rows, date):
             "columns": ["Что", "Было", "Стало"], "sections": sections}
 
 
-def balance_post(config, ask, root, stamp):
+def balance_post(config, ask, root, stamp, exclude=()):
     link, article = release_notes(config)
     print(f"Патчноут: {link}")
-    reply = ask(PROMPT.format(article=article[:30000]))
+    reply = ask(PROMPT.format(article=article[:30000], exclude=", ".join(exclude) or "нет"))
     candidate = (reply.get("candidates") or [{}])[0]
     raw = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts", []))
     match = re.search(r"\{.*\}", raw, re.DOTALL)
@@ -116,7 +117,8 @@ def balance_post(config, ask, root, stamp):
         raise ValueError(f"таблица не нарисовалась: {done.stderr.strip()[-300:]}")
     data.unlink()
     post = {"type": "photo", "image": f"images/{image.name}", "text": answer.get("text", "").strip(),
-            "source": link, "source_name": "Supercell", "cover_kind": "update"}
+            "source": link, "source_name": "Supercell", "cover_kind": "update", "kind": "balance",
+            "brawler": answer.get("brawler") or answer.get("brawler_ru") or "?"}
     errors = bot.validate_post(post)
     if errors:
         raise ValueError("пост с таблицей не прошёл проверку: " + "; ".join(errors))

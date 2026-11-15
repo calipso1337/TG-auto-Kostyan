@@ -36,6 +36,7 @@ def test_to_html_keeps_formatting_and_escapes():
     ("скачай приватку с читами", "читы"),
     ("путин и выборы", "политика"),
     ("ты даун, сдохни", "оскорбление"),
+    ("знаю твой адрес", "угроза"),
     ("звони +7 912 345-67-89", "личные данные"),
 ])
 def test_violations(text, reason):
@@ -48,8 +49,17 @@ def test_normal_chat_is_fine(text):
     assert admin.violations(text) == []
 
 
-def test_mat_is_not_a_violation():
-    assert admin.violations("бля, опять проиграл, сука") == []
+def test_mat_is_reported_now():
+    assert admin.violations("бля, опять проиграл, сука") == ["мат"]
+    assert admin.violations("Ебург, учебник, небо, колебался") == []
+
+
+@pytest.mark.parametrize("text, reason", [
+    ("я знаю где ты живешь", "угроза"), ("вычислю тебя по ip", "угроза"),
+    ("живу на улице Ленина дом 5", "адрес"), ("учусь в школе №45", "адрес"),
+    ("ты тупой идиот", "оскорбление")])
+def test_threats_and_addresses(text, reason):
+    assert any(reason in found for found in admin.violations(text))
 
 
 def test_post_from_message():
@@ -84,6 +94,7 @@ class FakeTelegram:
 def bot_env(tmp_path, monkeypatch):
     for name in ("QUEUE", "STATE", "INBOX", "SEEN", "CONFIG"):
         monkeypatch.setattr(bot, name, tmp_path / getattr(bot, name).name)
+    monkeypatch.setattr(admin, "LOG", tmp_path / "moderation_log.enc")
     posts = [{"type": "text", "text": "старый"}, {"type": "text", "text": "<b>Первый</b>"},
              {"type": "text", "text": "<b>Второй</b>"}]
     bot.QUEUE.write_text(json.dumps(posts, ensure_ascii=False), encoding="utf-8")
@@ -252,3 +263,18 @@ def test_busy_replies_once_without_confirming(bot_env, monkeypatch):
     robot.busy(10)
     busy = [m for m in fake.sent("sendMessage") if "публикую" in m["text"]]
     assert len(busy) == 1 and busy[0]["chat_id"] == OWNER
+
+
+def test_log_is_encrypted_and_shown(bot_env):
+    robot, fake = bot_env
+    robot.handle(group("ты тупой, бля"))
+    raw = admin.LOG.read_text()
+    assert "тупой" not in raw and "Вася" not in raw  # В публичном репозитории только шифр.
+    entries = admin.read_log("token")
+    assert entries[0]["reasons"] == ["оскорбление или травля", "мат"] and entries[0]["status"] == "ждёт решения"
+    assert admin.read_log("other-token") == []
+    robot.handle(press(f"md:{CHAT}:5:77"))
+    assert admin.read_log("token")[0]["status"] == "🗑 Удалено"
+    robot.handle(private("🛡 Нарушения"))
+    view = fake.sent("sendMessage")[-1]["text"]
+    assert "Нарушения за 7 дней: 1" in view and "мат: 1" in view and "Удалено" in view and "@vasya" in view

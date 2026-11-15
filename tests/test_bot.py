@@ -198,6 +198,7 @@ def test_choose_order():
     posts = [{"type": "text", "text": "x"}]
     assert bot.choose(posts, {"next": 0, "posted": 2}, [news, meme], MSK, "d", False) == ("meme", meme)
     assert bot.choose(posts, {"next": 0, "posted": 3}, [news, meme], MSK, "d", False) == ("news", news)
+    assert bot.choose(posts, {"next": 0, "posted": 2}, [meme], {"meme_every": 5}, "d", False) == ("queue", 0)
     assert bot.choose(posts, {"next": 0, "news_today": {"d": 3}}, [news], MSK, "d", False) == ("queue", 0)
     assert bot.choose(posts, {"next": 1}, [meme], MSK, "d", False) == ("meme", meme)
     assert bot.choose(posts, {"next": 1}, [], MSK, "d", False) is None
@@ -269,3 +270,12 @@ def test_html_tags_do_not_count_towards_limit():
 def test_real_queue_is_valid():
     posts = json.loads(bot.QUEUE.read_text(encoding="utf-8"))
     bot.validate(posts, bot.load_state()["next"])
+
+
+def test_videos_are_rare():
+    video = {"kind": "video", "id": "v", "post": {}}
+    posts = [{"type": "text", "text": "x"}] * 3
+    state = {"next": 0, "posted": 0}
+    assert bot.choose(posts, state, [video], MSK, "d", False) == ("video", video)
+    assert bot.choose(posts, {**state, "last_auto": "video"}, [video], MSK, "d", False) == ("queue", 0)
+    assert bot.choose(posts, {**state, "videos_today": {"d": 1}}, [video], MSK, "d", False) == ("queue", 0)

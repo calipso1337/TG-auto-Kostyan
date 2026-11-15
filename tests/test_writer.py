@@ -151,3 +151,20 @@ def test_one_news_per_article(no_network):
     added = writer.build_all([news, {**news, "text": "<b>ДУБЛЬ</b>"}], set(), {}, posts=[])
     assert len(added) == 1
     assert writer.build_all([news], set(), {}, posts=added) == []
+
+
+def test_balance_tables_take_new_brawlers(monkeypatch, tmp_path):
+    import balance
+    monkeypatch.setattr(writer, "ROOT", tmp_path)
+    monkeypatch.setattr(balance, "release_notes", lambda config: ("https://supercell.com/notes/", "text"))
+    order = iter(["Эмбер", "Шелли", "Кольт"])
+    seen = []
+
+    def fake_post(config, ask, root, stamp, exclude=()):
+        seen.append(list(exclude))
+        return {"type": "photo", "image": "x.png", "text": "x", "kind": "balance", "brawler": next(order)}
+    monkeypatch.setattr(balance, "balance_post", fake_post)
+    first = writer.balance_tables({}, 2)
+    assert [p["brawler"] for p in first] == ["Эмбер", "Шелли"] and seen == [[], ["Эмбер"]]
+    writer.balance_tables({}, 1)
+    assert seen[-1] == ["Эмбер", "Шелли"]

@@ -12,7 +12,9 @@ python3 admin.py --until-post   отвечать админам и следит�
 В чате обсуждений бот ищет нарушения (реклама, мошенничество, 18+, политика, травля, личные
 данные, флуд; мат не трогает) и присылает владельцу канала сообщение с кнопками.
 """
+import base64
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -26,7 +28,8 @@ import bot
 ROOT = bot.ROOT
 SYNC = os.environ.get("ADMIN_GIT_SYNC", "1") == "1"
 MENU = {"keyboard": [[{"text": "📋 Очередь"}, {"text": "📜 Вся очередь"}],
-                     [{"text": "🤖 Автопосты"}, {"text": "⏰ Следующий пост"}], [{"text": "❓ Помощь"}]],
+                     [{"text": "🤖 Автопосты"}, {"text": "⏰ Следующий пост"}],
+                     [{"text": "🛡 Нарушения"}, {"text": "❓ Помощь"}]],
         "resize_keyboard": True}
 HELP = (
     "<b>Управление каналом</b> (доступно только владельцу канала)\n\n"
@@ -40,8 +43,9 @@ HELP = (
     "➕ <b>Новый пост</b>: просто пришли сюда текст, фото, видео или GIF с подписью. "
     "Форматирование (жирный, курсив, цитата, ссылки) сохранится. Потом выбери: опубликовать сейчас, "
     "поставить следующим или в конец очереди.\n\n"
-    "🛡 <b>Чат</b>: если в комментариях нарушение (реклама, мошенничество, 18+, политика, травля, "
-    "личные данные, флуд), я пришлю его сюда с кнопками «Удалить» и «Забанить». Мат не трогаю.\n\n"
+    "🛡 <b>Чат</b>: если в комментариях нарушение (мат, оскорбления, угрозы, адреса и телефоны, реклама, "
+    "мошенничество, 18+, политика, флуд), я пришлю его сюда с кнопками «Удалить» и «Забанить». "
+    "Кнопка «🛡 Нарушения» показывает журнал.\n\n"
     "Чтобы я видел чат обсуждений, добавь меня туда администратором с правом удалять сообщения и банить."
 )
 PAGE = 10
@@ -62,15 +66,81 @@ RULES = [
     ("контент 18+", r"(порн\w*|\bсекс\w*|интим\w*|\b18\+|\bnudes?\b|onlyfans|онлифанс)"),
     ("политика", r"(путин\w*|зеленск\w*|навальн\w*|\bсво\b|\bвойн[аеуы]\b|политик\w*|хохл\w*|москал\w*|"
                  r"\bвыбор(ы|ах|ов)\b)"),
-    ("оскорбление, травля или угроза", r"(убей себя|убейся|сдохни|\bkys\b|выпились|повесься|самоубий\w*|"
-                                       r"\bдаун\w*|аутист\w*|дебил\w*|\bурод\w*|\bчмо\b|ничтожеств\w*|нищеброд\w*|"
-                                       r"\bлох\w*\b|чурк\w*|\bхач\w*|\bжид\w*|нигг\w*|nigg\w*|пидор\w*|пидр\w*|"
-                                       r"найду тебя|убью тебя)"),
+    ("оскорбление или травля", r"(убей себя|убейся|сдохни|\bkys\b|выпились|повесься|самоубий\w*|"
+                               r"\bдаун\w*|аутист\w*|дебил\w*|\bурод\w*|\bчмо\b|ничтожеств\w*|нищеброд\w*|"
+                               r"\bлох\w*\b|\bидиот\w*|\bкретин\w*|\bпридур\w*|\bмраз\w*|\bтвар[ьи]\b|"
+                               r"\bгнид\w*|\bублюд\w*|\bотброс\w*|\bскотин\w*|\bтуп(ой|ая|ица|орыл\w*)\b|"
+                               r"\bжирн(ый|ая|ое)\b|чурк\w*|\bхач\w*|\bжид\w*|нигг\w*|nigg\w*|пидор\w*|пидр\w*)"),
+    ("угроза", r"(найду тебя|убью тебя|\bубью\b|\bзарежу\b|\bизобью\b|\bпобью\b|прибью|приду к тебе|"
+               r"знаю,? где ты живешь|знаю,? где ты живёшь|знаю твой адрес|встречу тебя|тебе конец|"
+               r"вычислю|вычислим|по ip|сольём тебя|солью тебя|\bдеанон\w*)"),
+    ("личные данные (адрес, школа)", r"(\bул\.?\s+[А-ЯЁ]\w+|\bулиц[аеы]\s+[А-ЯЁ]\w+|\bдом\s+\d+|\bкв\.?\s*\d+|"
+                                     r"\bквартир[аеы]\s+\d+|\bшкол[аеуы]\s*№?\s*\d+|\bмой адрес\b|"
+                                     r"\bживу (на|в) (улиц|доме|районе)\w*)"),
+    ("мат", r"(\bху[йяеёи]\w*|\bнаху\w*|\bпоху\w*|\bоху[еи]\w*|\bп[иеё]зд\w*|\bеба\w*|\bебл\w*|\bеби\w*|"
+            r"\bёб\w*|\bеб(?!ург)[ау]\w*|\bвыеб\w*|\bзаеб\w*|\bзаёб\w*|\bотъеб\w*|\bсъеб\w*|\bуеб\w*|\bу[её]бок\w*|"
+            r"\bдолбо[её]б\w*|\bбля\w*|\bсук[аиуеоя]?\b|\bсучк\w*|\bмудак\w*|\bмудил\w*|\bзалуп\w*|"
+            r"\bгандон\w*|\bшлюх\w*|\bхер(ня|ов\w*|а|ом)?\b)"),
     ("азарт или наркотики", r"(казино|\bставк\w* на\b|1xbet|букмекер\w*|наркот\w*|закладк\w*|\bснюс\w*)"),
     ("личные данные (телефон)", r"((\+7|\b8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}\b)"),
 ]
 RULES = [(name, re.compile(pattern, re.IGNORECASE)) for name, pattern in RULES]
 FLOOD = (6, 30)  # Шесть сообщений за 30 секунд от одного человека это флуд.
+LOG = ROOT / "moderation_log.enc"
+
+
+# ---------- Журнал нарушений (зашифрован: репозиторий публичный, а в чате пишут дети) ----------
+
+
+def _key(token):
+    return hashlib.sha256(b"moderation-log:" + token.encode()).digest()
+
+
+def _stream(key, nonce, size):
+    out, counter = bytearray(), 0
+    while len(out) < size:
+        out += hashlib.sha256(key + nonce + counter.to_bytes(8, "big")).digest()
+        counter += 1
+    return bytes(out[:size])
+
+
+def encrypt(data, token):
+    key, nonce = _key(token), os.urandom(16)
+    body = bytes(a ^ b for a, b in zip(data, _stream(key, nonce, len(data))))
+    mac = hmac.new(key, nonce + body, hashlib.sha256).digest()
+    return base64.b64encode(nonce + mac + body).decode()
+
+
+def decrypt(text, token):
+    raw = base64.b64decode(text)
+    key, nonce, mac, body = _key(token), raw[:16], raw[16:48], raw[48:]
+    if not hmac.compare_digest(mac, hmac.new(key, nonce + body, hashlib.sha256).digest()):
+        raise ValueError("журнал повреждён или зашифрован другим токеном")
+    return bytes(a ^ b for a, b in zip(body, _stream(key, nonce, len(body))))
+
+
+def read_log(token):
+    try:
+        return json.loads(decrypt(LOG.read_text(), token)) if LOG.exists() else []
+    except (ValueError, OSError) as error:
+        print(f"Журнал нарушений не прочитался: {error}")
+        return []
+
+
+def change_log(token, change):
+    """Меняет журнал на свежей версии и сохраняет в GitHub (зашифрованным)."""
+    for _ in range(4):
+        refresh()
+        entries = read_log(token)
+        change(entries)
+        LOG.write_text(encrypt(json.dumps(entries[-300:], ensure_ascii=False).encode(), token))
+        if not SYNC:
+            return
+        git("add", LOG.name)
+        git("commit", "-q", "-m", "Журнал модерации")
+        if git("push", "-q", "origin", "HEAD:main").returncode == 0:
+            return
+        time.sleep(3)
 
 
 def violations(text):
@@ -277,7 +347,7 @@ class Admin:
         lines = [f"📜 <b>Вся очередь</b>, следующий пост {bot.clock(self.config, moment):%d.%m в %H:%M}", "",
                  f"<b>Посты ({len(posts) - state['next']}):</b>"]
         lines += [f"{n}. {html.escape(title(p), quote=False)}" for n, p in enumerate(posts[state["next"]:], 1)]
-        names = {"meme": "😂 мем", "news": "📰 новость/видео"}
+        names = {"meme": "😂 мем", "news": "📰 новость", "video": "🎬 видео ютубера"}
         lines += ["", f"<b>Автопосты ({len(inbox)}), выходят в свои слоты (мем каждым "
                       f"{self.config.get('meme_every', 3)}-м постом, новости сразу):</b>"]
         lines += [f"• {names.get(i['kind'], i['kind'])}: {html.escape(title(i['post']), quote=False)}" for i in inbox]
@@ -290,6 +360,27 @@ class Admin:
                 chunk = ""
             chunk += line + "\n"
         return self.say(chat, chunk)
+
+    def log_view(self, chat):
+        refresh()
+        entries = read_log(self.token)
+        if not entries:
+            return self.say(chat, "🛡 Нарушений пока не было. Если бот не видит чат, проверь, что он администратор "
+                                  "в чате обсуждений.")
+        week = [e for e in entries if time.time() - e["t"] < 7 * 86400]
+        counts = {}
+        for entry in week:
+            for reason in entry["reasons"]:
+                counts[reason] = counts.get(reason, 0) + 1
+        lines = [f"🛡 <b>Нарушения за 7 дней: {len(week)}</b>"]
+        lines += [f"• {html.escape(r, quote=False)}: {n}" for r, n in sorted(counts.items(), key=lambda x: -x[1])]
+        lines += ["", "<b>Последние:</b>"]
+        for entry in reversed(entries[-15:]):
+            who = html.escape(entry["name"] or "без имени", quote=False) + (f" (@{entry['login']})" if entry["login"] else "")
+            lines.append(f"{bot.clock(self.config, entry['t']):%d.%m %H:%M} · {', '.join(entry['reasons'])} · {who}\n"
+                         f"«{html.escape(entry['text'][:120], quote=False)}» → {entry['status']} "
+                         f'<a href="{entry["link"]}">открыть</a>')
+        return self.say(chat, "\n".join(lines))
 
     def auto_view(self, chat):
         refresh()
@@ -459,6 +550,8 @@ class Admin:
             return self.full_list(chat)
         if text in ("/auto", "🤖 Автопосты"):
             return self.auto_view(chat)
+        if text in ("/log", "🛡 Нарушения"):
+            return self.log_view(chat)
         if text in ("/next", "⏰ Следующий пост"):
             state = bot.load_state()
             moment = bot.next_post_at(self.config, state, time.time())
@@ -540,6 +633,14 @@ class Admin:
                 f"👤 {name}{login}, id {sender.get('id')}\n\n<blockquote>{body}</blockquote>\n"
                 f'<a href="{link}">Открыть сообщение</a>')
         key = f"{chat}:{msg}:{sender.get('id')}"
+        entry = {"t": int(time.time()), "key": key, "reasons": reasons, "name": " ".join(filter(None, [
+            sender.get("first_name"), sender.get("last_name")])), "login": sender.get("username", ""),
+            "uid": sender.get("id"), "text": (message.get("text") or message.get("caption") or "")[:300],
+            "link": link, "status": "ждёт решения"}
+        try:
+            change_log(self.token, lambda entries: entries.append(entry))
+        except Exception as error:  # noqa: BLE001 - журнал не должен мешать предупреждению
+            print(f"Журнал не сохранился: {error}")
         return self.say(self.owner, text, {"inline_keyboard": [[
             {"text": "🗑 Удалить", "callback_data": f"md:{key}"},
             {"text": "🚫 Удалить и забанить", "callback_data": f"mb:{key}"}],
@@ -559,6 +660,14 @@ class Admin:
                 result = "🚫 Удалено, автор забанен"
         except RuntimeError as error:
             result = f"Не получилось: {error}. Проверь, что я админ чата с правом удалять и банить."
+        def mark(entries):
+            for entry in entries:
+                if entry.get("key") == key:
+                    entry["status"] = result
+        try:
+            change_log(self.token, mark)
+        except Exception as error:  # noqa: BLE001
+            print(f"Журнал не обновился: {error}")
         message = query["message"]
         return self.api("editMessageText", chat_id=message["chat"]["id"], message_id=message["message_id"],
                         text=f"{message.get('text', '')}\n\n{result}")

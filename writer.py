@@ -52,6 +52,9 @@ RULES = """Ты редактор русскоязычного Telegram-кана�
 Виды постов:
 - news: новость по одной из СВЕЖИХ ОФИЦИАЛЬНЫХ СТАТЕЙ ниже. Факты, числа и даты бери только из текста
   статьи, source это её адрес. Если статей нет, новости не пиши.
+- brawler: разбор одного бойца: роль, атака, супер и гиперзаряд своими словами, сильные и слабые
+  стороны, кого он контрит и кто контрит его, лучшие режимы. Без чисел характеристик (урон, здоровье),
+  если их нет в свежих статьях ниже. Каждый раз другой боец.
 - fact: интересный факт, лор или история бойца, пасхалка, история режима или карты.
 - top: подборка «Топ-5» (бойцы для режима, лучшие гиперзаряды, самые сильные контрпики и т.п.).
 - tip: совет или разбор механики.
@@ -93,6 +96,7 @@ RULES = """Ты редактор русскоязычного Telegram-кана�
              "title": "до 40 символов", "subtitle": "до 60 символов", "stat": "только настоящее число из фактов игры, иначе пусто",
              "stat_label": "подпись к числу или пусто"}}}}
 {{"kind": "tip", "text": "...", "cover": {{...как выше, kind tip, fun или brawler...}}}}
+{{"kind": "brawler", "text": "...", "cover": {{...как выше, kind brawler, title имя бойца...}}}}
 {{"kind": "fact", "text": "...", "cover": {{...как выше, kind lore, fun или brawler...}}}}
 {{"kind": "top", "text": "...", "cover": {{...как выше, kind top...}}}}
 {{"kind": "poll", "text": "короткий пост перед опросом", "question": "до 250 символов",
@@ -274,8 +278,8 @@ def build(item, grounded, stamp, number):
             if made_up:
                 return None, f"в новости числа, которых нет в статье: {', '.join(made_up[:5])}"
         post.update(source=source, source_name="Supercell" if domain(source) == "supercell.com" else domain(source))
-    if kind in ("news", "tip", "poll", "fact", "top"):
-        default = {"poll": "poll", "tip": "tip", "fact": "lore", "top": "top"}.get(kind, "news")
+    if kind in ("news", "tip", "poll", "fact", "top", "brawler"):
+        default = {"poll": "poll", "tip": "tip", "fact": "lore", "top": "top", "brawler": "brawler"}.get(kind, "news")
         post["cover_kind"] = (item.get("cover") or {}).get("kind") or default
         post["kind"] = kind
         draw(ROOT / f"{name}.png", cover_args(item.get("cover") or {}), everything)
@@ -329,11 +333,13 @@ def batch_plan(count, polls_ok, articles):
         plan += ["news"] * min(2, count)
     if polls_ok:
         plan.append("poll")
-    cycle = ["fact", "top", "tip", "fact", "top", "tip", "fact", "top"]
+    # Больше информационных постов: разборы бойцов и факты, советов и топов меньше.
+    cycle = ["brawler", "fact", "brawler", "top", "brawler", "tip", "fact", "brawler"]
     while len(plan) < count:
         plan.append(cycle[len(plan) % len(cycle)])
     plan = plan[:count]
-    names = {"news": "новость", "poll": "опрос", "fact": "факт или лор", "top": "топ-5", "tip": "совет"}
+    names = {"news": "новость", "brawler": "разбор бойца", "poll": "опрос", "fact": "факт или лор",
+             "top": "топ-5", "tip": "совет"}
     return plan, ", ".join(f"{plan.count(k)} × {names[k]}" for k in names if plan.count(k))
 
 
@@ -418,6 +424,32 @@ def build_all(items, grounded, config, tag="gemini", posts=(), only_poll=False):
         else:
             print(f"- пропущен ({reason}): {headline(item.get('text'))}")
     return added
+
+
+def balance_tables(config, count):
+    """Таблицы баланса по свежему патчноуту: каждый раз новый боец (balance_used.json)."""
+    import balance
+
+    used = bot.read_json(ROOT / "balance_used.json", [])
+    models = [config["gemini_model"]] if config.get("gemini_model") else DEFAULT_MODELS
+    zone = timezone(timedelta(hours=config.get("timezone_offset_hours", 3)))
+    tables = []
+    for number in range(count):
+        try:
+            link, _ = balance.release_notes(config)
+            done = [u["brawler"] for u in used if u["article"] == link]
+            post = balance.balance_post(config, lambda prompt: ask_gemini(prompt, models, search=False), ROOT,
+                                        datetime.now(zone).strftime("%Y-%m-%d-%H%M") + f"-{number}", exclude=done)
+        except (RuntimeError, ValueError, OSError) as error:
+            print(f"Таблица баланса не получилась: {error}")
+            break
+        if post["brawler"] in done:
+            break
+        used.append({"article": link, "brawler": post["brawler"]})
+        tables.append(post)
+        print(f"+ таблица баланса: {post['brawler']}")
+    bot.write_json(ROOT / "balance_used.json", used[-200:])
+    return tables
 
 
 def art_albums(count, posts):
@@ -556,7 +588,9 @@ def main():
     if only != "moment":  # Моменту обложка не нужна.
         prepare_backgrounds(config)
         load_articles(config)
-    albums = [] if only else art_albums(min(2, max(need - 1, 0)), posts)
+    albums = [] if only else art_albums(1 if need >= 6 else 0, posts)  # Артов немного: один альбом.
+    if not only:
+        albums += balance_tables(config, min(2, max(need - len(albums) - 2, 0)))
     moments = []
     # Посты-ссылки с таймкодом владелец не хочет: только по явному запросу (--publish moment).
     if only == "moment" or (not only and config.get("moments")):

@@ -10,7 +10,7 @@
     5,
     40
   ],
-  "meme_every": 3,
+  "meme_every": 5,
   "max_news_per_day": 3,
   "youtube": [
     {
@@ -85,5 +85,6 @@
       "name": "Весёлый Кот",
       "channel_id": "UCiE3TqG7v_bXZCYB_FaFvDw"
     }
-  ]
+  ],
+  "max_videos_per_day": 1
 }

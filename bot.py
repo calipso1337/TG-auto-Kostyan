@@ -453,12 +453,18 @@ def choose(posts, state, inbox, config, day, manual):
     memes = sorted((item for item in inbox if item["kind"] == "meme"),
                    key=lambda item: not str(item.get("post", {}).get("video", "")).startswith("tg:"))
     news = [item for item in inbox if item["kind"] == "news"]
+    videos = [item for item in inbox if item["kind"] == "video"]
     news_today = state.get("news_today", {}).get(day, 0)
-    every = config.get("meme_every", 3)
+    videos_today = state.get("videos_today", {}).get(day, 0)
+    every = config.get("meme_every", 5)
     if memes and not manual and every and state.get("posted", 0) % every == every - 1:
         return "meme", memes[0]
     if news and news_today < config.get("max_news_per_day", 3):
         return "news", news[0]
+    # Ролики ютуберов не чаще max_videos_per_day, и только через пост из очереди.
+    last_video = state.get("last_auto") == "video"
+    if videos and not last_video and videos_today < config.get("max_videos_per_day", 1):
+        return "video", videos[0]
     if state["next"] < len(posts):
         return "queue", state["next"]
     if memes and not manual:
@@ -532,13 +538,16 @@ def main():
         if where == "queue":
             publish(token, channel, posts[item])
             state["next"] = item + 1
+            state["last_auto"] = "queue"
             print(f"Опубликован пост {item + 1} из {len(posts)}")
         else:
             inbox.remove(item)
             write_json(INBOX, inbox)  # Сломанный материал не должен блокировать слот навсегда.
             publish(token, channel, item["post"])
-            if where == "news":
-                state["news_today"] = {day: state.get("news_today", {}).get(day, 0) + 1}
+            if where in ("news", "video"):
+                counter = f"{where}s_today" if where == "video" else "news_today"
+                state[counter] = {day: state.get(counter, {}).get(day, 0) + 1}
+            state["last_auto"] = where
             print(f"Опубликован автоматический пост ({where}): {item['id']}")
         state["posted"] = state.get("posted", 0) + 1
     if not manual:

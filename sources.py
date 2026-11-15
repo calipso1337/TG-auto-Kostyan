@@ -268,7 +268,7 @@ def fetch_youtube(config, inbox, seen, now):
             remember(seen, key, video["id"])
             # При первом запуске старые ролики просто запоминаем, чтобы не завалить канал.
             if not first_run and now - video["published"] < NEWS_TTL and good_video(video):
-                add(inbox, "news", video["id"], youtube_post(video, channel), now)
+                add(inbox, "video", video["id"], youtube_post(video, channel), now)
                 print(f"YouTube: {channel['name']}: {video['title']}")
 
 
@@ -399,7 +399,7 @@ def fetch_memes(config, inbox, seen, now):
 
 
 def expire(inbox, now):
-    ttl = {"news": NEWS_TTL, "meme": MEME_TTL}
+    ttl = {"news": NEWS_TTL, "video": NEWS_TTL, "meme": MEME_TTL}
     return [item for item in inbox if now - item["added"] < ttl.get(item["kind"], NEWS_TTL)]
 
 

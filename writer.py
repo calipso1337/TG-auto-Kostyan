@@ -136,8 +136,14 @@ def similar(a, b):
 def duplicate(item, posts):
     """Gemini повторил тему, которая уже была или уже стоит в очереди."""
     title = headline(item.get("text") or item.get("question"))
-    return next((headline(p.get("text") or p.get("question")) for p in posts[-300:]
-                 if similar(title, headline(p.get("text") or p.get("question")))), None)
+    titles = [headline(p.get("text") or p.get("question")) for p in posts[-300:]]
+    # И всё, что уже вышло в канале (в том числе пробные посты и посты, добавленные вручную).
+    titles += [k[6:] for k in bot.load_state().get("published", []) if k.startswith("title:")]
+    titles += PUBLISHED_EXTRA
+    return next((t for t in titles if similar(title, t)), None)
+
+
+PUBLISHED_EXTRA = []  # Заголовки вышедших пробных постов этого запуска.
 
 
 def recent_topics(posts, inbox):

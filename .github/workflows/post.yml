@@ -44,6 +44,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL: ${{ vars.TELEGRAM_CHANNEL }}
+          GH_TOKEN: ${{ github.token }}
       - name: Взять свежую очередь
         run: git pull --ff-only origin main
       - name: Установить yt-dlp (список Shorts и роликов, без скачивания)

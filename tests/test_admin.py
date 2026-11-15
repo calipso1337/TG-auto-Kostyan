@@ -198,3 +198,38 @@ def test_full_list_and_auto_posts(bot_env):
     assert fake.sent("sendMessage")[-1]["reply_markup"]["inline_keyboard"][0][1]["text"] == "🗑"
     robot.handle(press(f"id:{admin.pid(item['post'])}"))
     assert bot.read_json(bot.INBOX, None) == []
+
+
+def test_clip_request_after_video(bot_env, monkeypatch):
+    robot, fake = bot_env
+    runs = []
+    monkeypatch.setattr(admin.subprocess, "run", lambda args, **kw: runs.append(args) or
+                        type("Done", (), {"returncode": 0, "stderr": ""})())
+    robot.handle(private(None, video={"file_id": "VID", "file_size": 5_000_000}))
+    assert "выбери 5 моментов" in fake.sent("sendMessage")[-1]["text"]
+    robot.handle(private("выбери 5 моментов"))
+    assert runs and "file_id=VID" in runs[-1] and "count=5" in runs[-1]
+    robot.handle(private("Классный момент в игре"))  # Обычный текст не запускает нарезку.
+    assert len(runs) == 1
+
+
+def test_clip_too_big(bot_env):
+    robot, fake = bot_env
+    robot.handle(private(None, video={"file_id": "BIG", "file_size": 60_000_000}, caption="выбери 3 момента"))
+    assert "20 МБ" in fake.sent("sendMessage")[-1]["text"]
+
+
+def test_add_clips_from_batch(bot_env, monkeypatch):
+    robot, fake = bot_env
+    monkeypatch.setattr(admin, "BATCH", bot.QUEUE.parent / "clip_batch.json")
+    bot.write_json(admin.BATCH, {"batch": "77", "clips": [
+        {"n": 1, "file_id": "A", "title": "Фейл & крах"}, {"n": 2, "file_id": "B", "title": "Трюк"},
+        {"n": 3, "file_id": "C", "title": "Вылет"}]})
+    robot.handle(private("добавь 1 3"))
+    added = queue()[-2:]
+    assert [p["video"] for p in added] == ["tg:A", "tg:C"] and "Фейл &amp; крах" in added[0]["text"]
+    assert all(bot.validate_post(p) == [] for p in added)
+    robot.handle(press("cn:77:2"))
+    assert queue()[1]["video"] == "tg:B"
+    robot.handle(press("cn:99:2"))
+    assert "устарела" in fake.sent("sendMessage")[-1]["text"]

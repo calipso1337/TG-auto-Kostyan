@@ -34,6 +34,9 @@ HELP = (
     "🤖 <b>Автопосты</b>: мемы, видео и новости, которые бот нашёл сам; их можно посмотреть и удалить.\n"
     "📋 <b>Очередь</b>: сколько постов ждут и кнопки у каждого:\n"
     "👁 посмотреть пост целиком, 🚀 опубликовать сейчас, ✏️ заменить текст или медиа, 🗑 удалить.\n\n"
+    "🎬 <b>Нарезка</b>: пришли видео с подписью «выбери 5 моментов» (или напиши это сразу после видео). "
+    "Gemini найдёт самые смешные моменты, я пришлю нарезки, а ты ответишь «добавь 1 3», «добавь все» "
+    "или «следующим 2». Видео до 20 МБ.\n\n"
     "➕ <b>Новый пост</b>: просто пришли сюда текст, фото, видео или GIF с подписью. "
     "Форматирование (жирный, курсив, цитата, ссылки) сохранится. Потом выбери: опубликовать сейчас, "
     "поставить следующим или в конец очереди.\n\n"
@@ -42,6 +45,10 @@ HELP = (
     "Чтобы я видел чат обсуждений, добавь меня туда администратором с правом удалять сообщения и банить."
 )
 PAGE = 10
+CLIP_REQUEST = re.compile(r"^\s*(выбери|нарежь|нарезка|нарезку|сделай нарезк)", re.IGNORECASE)
+CLIP_ADD = re.compile(r"^\s*(добавь|следующим|сейчас|опубликуй)\b(.*)$", re.IGNORECASE)
+TG_DOWNLOAD_LIMIT = 20_000_000  # Больше Telegram боту скачать не даст.
+BATCH = ROOT / "clip_batch.json"
 
 # ---------- Модерация (без мата: его владелец разрешил) ----------
 
@@ -192,6 +199,7 @@ class Admin:
         self.pending = {}  # chat_id -> ("edit", post_id) | ("draft", post)
         self.drafts = {}
         self.recent = {}
+        self.last_video = None  # (file_id, размер, время): для «выбери 5 моментов» после видео
         self.config = bot.load_config()
 
     def api(self, method, **payload):
@@ -365,6 +373,13 @@ class Admin:
             return self.say(chat, "Отменено.")
         if action in ("md", "mb", "mk"):
             return self.on_moderation(query, action, key)
+        if action in ("ca", "cn", "cp"):
+            batch, _, number = key.partition(":")
+            if bot.read_json(BATCH, {}).get("batch") != batch:
+                refresh()
+            if bot.read_json(BATCH, {}).get("batch") != batch:
+                return self.say(chat, "Эта нарезка устарела: кнопки работают только для последней.")
+            return self.add_clips(chat, {"ca": "end", "cn": "next", "cp": "now"}[action], [int(number)])
         return None
 
     def publish_from_queue(self, chat, key):
@@ -387,6 +402,51 @@ class Admin:
             raise
         return self.say(chat, "🚀 Опубликовано в канале.")
 
+    # ----- нарезка моментов -----
+
+    def start_clips(self, chat, file_id, size, text):
+        if size and size > TG_DOWNLOAD_LIMIT:
+            return self.say(chat, "Видео больше 20 МБ: такие Telegram не даёт боту скачать. Пришли ролик покороче "
+                                  "или сожми его (например, отправь из телефона со сжатием).")
+        found = re.search(r"\d+", text or "")
+        count = max(1, min(int(found.group(0)) if found else 3, 10))
+        done = subprocess.run(["gh", "workflow", "run", "clip.yml", "--repo", os.environ.get("GITHUB_REPOSITORY", ""),
+                               "-f", f"file_id={file_id}", "-f", f"count={count}", "-f", f"chat={chat}"],
+                              capture_output=True, text=True)
+        if done.returncode:
+            return self.say(chat, f"Не получилось запустить нарезку: {html.escape(done.stderr[-200:], quote=False)}")
+        self.last_video = None
+        return self.say(chat, f"🎬 Принял! Gemini ищет {count} самых смешных моментов, потом я их вырежу и пришлю. "
+                              "Обычно это 3-10 минут.")
+
+    def clip_posts(self, numbers):
+        """Посты из последней нарезки по номерам ([] = все)."""
+        refresh()
+        batch = bot.read_json(BATCH, {})
+        clips = [c for c in batch.get("clips", []) if not numbers or c["n"] in numbers]
+        return [{"type": "video", "video": "tg:" + c["file_id"], "kind": "meme",
+                 "text": (f"<b>😂 МОМЕНТ ДНЯ</b>\n<i>{html.escape(c['title'], quote=False)}</i>\n\n"
+                          "Ставь 😂 если зашло\n\n#BrawlStars #мем")} for c in clips]
+
+    def add_clips(self, chat, where, numbers):
+        posts_to_add = self.clip_posts(numbers)
+        if not posts_to_add:
+            return self.say(chat, "Не нашёл таких нарезок. Номера смотри в подписях к роликам («Момент 2: …»).")
+        if where == "now":
+            for post in posts_to_add:
+                bot.publish(self.token, self.channel, post)
+            return self.say(chat, f"🚀 Опубликовано в канале: {len(posts_to_add)}.")
+
+        def add(posts, state):
+            if where == "next":
+                posts[state["next"]:state["next"]] = posts_to_add
+            else:
+                posts.extend(posts_to_add)
+            return len(posts) - state["next"]
+        total = mutate(add, "Админ добавил нарезки в очередь")
+        place = "первыми в очередь" if where == "next" else "в конец очереди"
+        return self.say(chat, f"✅ Добавлено {place}: {len(posts_to_add)}. Теперь в очереди {total} постов.")
+
     def on_private(self, message):
         chat, text = message["chat"]["id"], (message.get("text") or "").strip()
         if message.get("from", {}).get("id") not in self.admins:
@@ -406,6 +466,22 @@ class Admin:
         if text == "/cancel":
             self.pending.pop(chat, None)
             return self.say(chat, "Отменено.", MENU)
+        video = message.get("video") or message.get("animation") or message.get("document")
+        if video and (message.get("caption") and CLIP_REQUEST.search(message["caption"])):
+            return self.start_clips(chat, video["file_id"], video.get("file_size"), message["caption"])
+        if text and CLIP_REQUEST.search(text):
+            if self.last_video and time.time() - self.last_video[2] < 1800:
+                return self.start_clips(chat, self.last_video[0], self.last_video[1], text)
+            return self.say(chat, "Сначала пришли видео, а потом напиши «выбери 5 моментов». "
+                                  "Или отправь видео сразу с такой подписью.")
+        command = CLIP_ADD.match(text) if text else None
+        if command:
+            word, rest = command.group(1).lower(), command.group(2)
+            where = {"следующим": "next", "сейчас": "now", "опубликуй": "now"}.get(word, "end")
+            numbers = [] if "все" in rest.lower() else [int(n) for n in re.findall(r"\d+", rest)]
+            return self.add_clips(chat, where, numbers)
+        if message.get("video"):
+            self.last_video = (message["video"]["file_id"], message["video"].get("file_size"), time.time())
         post = post_from_message(message)
         if not post:
             return self.say(chat, "Такой тип сообщения я пока не умею добавлять. Пришли текст, фото, видео или GIF.")
@@ -431,7 +507,8 @@ class Admin:
                             else "Этого поста уже нет в очереди.")
         key = pid(post)
         self.drafts[key] = post
-        return self.say(chat, "Что сделать с этим постом?", {"inline_keyboard": [
+        hint = "\n\nЕсли хочешь нарезку: напиши «выбери 5 моментов»." if message.get("video") else ""
+        return self.say(chat, "Что сделать с этим постом?" + hint, {"inline_keyboard": [
             [{"text": "🚀 Опубликовать сейчас", "callback_data": f"n:{key}"}],
             [{"text": "⏭ Следующим в очереди", "callback_data": f"s:{key}"},
              {"text": "📥 В конец очереди", "callback_data": f"a:{key}"}],

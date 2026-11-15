@@ -14,6 +14,6 @@ def test_clean_moments():
            {"start": 590, "end": 700, "title": "за концом"},
            {"start": "x"}, {"start": 50, "end": 51}]
     moments = clipbot.clean_moments(raw, 5, 600)
-    assert moments == [(10.0, 30.0, "Фейл"), (100.0, 160.0, "длинный"), (590.0, 600.0, "за концом")]
+    assert [m[:3] for m in moments] == [(10.0, 30.0, "Фейл"), (100.0, 160.0, "длинный"), (590.0, 600.0, "за концом")]
     assert len(clipbot.clean_moments(raw, 1, 600)) == 1
     assert clipbot.stamp(95) == "1:35"

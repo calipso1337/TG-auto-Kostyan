@@ -95,12 +95,14 @@ def video_card(video_id, short, text, url, channel):
 
 
 def youtube_post(video, channel):
+    import styles
+
     text = (
-        "<b>🎬 НОВОЕ ВИДЕО</b>\n"
+        f"<b>{styles.pick(styles.VIDEO_HEADS)}</b>\n"
         f"<i>{clean(video['title'], 200)}</i>\n\n"
         f"{author_line(channel)}\n"
         "▶️ Плеер над постом\n\n"
-        "🔥 уже посмотрел · 👀 смотрю сейчас\n\n"
+        f"{styles.pick(styles.VIDEO_CTAS)}\n\n"
         "#BrawlStars #видео"
     )
     return video_card(video["id"], video.get("short"), text, video["url"], channel)
@@ -150,10 +152,12 @@ def blog_post(url, meta, fallback_image):
     if not title:
         return None
     description = clean(meta.get("og:description") or meta.get("description"), 400)
-    text = f"<b>📰 СВЕЖЕЕ ОТ SUPERCELL</b>\n<i>{title}</i>"
+    import styles
+
+    text = f"<b>{styles.pick(styles.NEWS_HEADS)}</b>\n<i>{title}</i>"
     if description:
         text += f"\n\n<blockquote>{description}</blockquote>"
-    text += "\n\n📌 Всё подробно в статье по ссылке ниже\n\n💬 Ждал такое? Ставь 🔥 или 🗿\n\n#BrawlStars #новости"
+    text += f"\n\n📌 Всё подробно в статье по ссылке ниже\n\n{styles.pick(styles.NEWS_CTAS)}\n\n#BrawlStars #новости"
     image = meta.get("og:image") or ""
     if image.startswith("https://"):
         return {"type": "photo", "image": image, "fallback_image": fallback_image, "text": text,
@@ -307,14 +311,9 @@ def shorts_list(channel_id, limit=30):
 
 def short_post(video_id, title, channel):
     url = f"https://www.youtube.com/shorts/{video_id}"
-    text = (
-        "<b>😂 МЕМ ДНЯ</b>\n"
-        f"<i>{clean(title, 200)}</i>\n\n"
-        f"{author_line(channel)}\n"
-        "▶️ Плеер над постом\n\n"
-        "Ставь 😂 если зашло\n\n"
-        "#BrawlStars #мем"
-    )
+    import styles
+
+    text = styles.meme_text(html.unescape(clean(title, 200)), "", author_line(channel))
     return video_card(video_id, True, text, url, channel)
 
 
@@ -346,13 +345,10 @@ def clip_post(clip):
     """Пост с видеофайлом, который вырезала программа владельца (local/clipper.py)."""
     channel = html.escape(clip.get("channel") or "YouTube", quote=False)
     channel_url = html.escape(clip.get("channel_url") or clip["url"], quote=True)
-    text = (
-        "<b>😂 МЕМ ДНЯ</b>\n"
-        f"<i>{clean(clip.get('caption') or 'Самый пересматриваемый момент', 200)}</i>\n\n"
-        f'🎬 Фрагмент из нарезки <a href="{channel_url}">{channel}</a>\n\n'
-        "Ставь 😂 если зашло\n\n"
-        "#BrawlStars #мем"
-    )
+    import styles
+
+    text = styles.meme_text(clip.get("caption") or "Самый пересматриваемый момент", "",
+                            f'🎬 Фрагмент из нарезки <a href="{channel_url}">{channel}</a>')
     return {"type": "video", "video": "tg:" + clip["file_id"], "text": text, "source": clip["url"],
             "source_name": f"YouTube: {clip.get('channel') or 'нарезка'}", "kind": "meme"}
 

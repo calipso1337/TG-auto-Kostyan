@@ -114,7 +114,73 @@ def shadow_text(draw, xy, text, font, fill, offset=3):
     draw.text((x, y), text, font=font, fill=fill)
 
 
-def card(output, kind, title, subtitle="", stat="", stat_label="", bg=None):
+def photo_background(path, width, height, mode):
+    """Кадр для макетов bottom (затемнение снизу) и center (равномерное затемнение)."""
+    photo = ImageOps.autocontrast(cover_crop(Image.open(path), width, height), cutoff=1).convert("RGBA")
+    if mode == "center":
+        return Image.alpha_composite(photo, Image.new("RGBA", (width, height), (8, 6, 22, 150)))
+    fade = Image.new("L", (1, height))
+    for y in range(height):
+        t = max(0.0, (y / height - 0.35) / 0.65)
+        fade.putpixel((0, y), int(235 * t ** 1.3))
+    shade = Image.new("RGBA", (width, height), (6, 5, 18, 255))
+    return Image.composite(shade, photo, fade.resize((width, height)))
+
+
+def card_alt(output, kind, title, subtitle, stat, stat_label, bg, layout):
+    """Макеты bottom (текст на плашке снизу) и center (крупный заголовок по центру)."""
+    label, start, end, accent = KINDS.get(kind, KINDS["news"])
+    base = photo_background(bg, W * S, H * S, layout) if bg else gradient_background(kind)
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    side = 72 * S
+    extra = f"★ {clean(stat)} {clean(stat_label)}".strip() if stat else ""
+    if layout == "center":
+        width = W * S - 2 * side
+        title_font, lines, line_height = fit(draw, clean(title).upper(), BOLD, width, 3, 88, 44)
+        sub_font, sub_lines, sub_height = fit(draw, clean(subtitle), REGULAR, width, 2, 32, 24)
+        block = len(lines) * line_height + (20 * S + len(sub_lines) * sub_height if sub_lines else 0)
+        y = (H * S - block) // 2 + 20 * S
+        badge_font = face(BOLD, 22)
+        badge_w = draw.textlength(label, font=badge_font) + 44 * S
+        pill(draw, int((W * S - badge_w) / 2), y - 90 * S, label, (*accent, 255), (17, 12, 40))
+        for line in lines:
+            draw.text((W * S // 2, y), line, font=title_font, fill=(255, 255, 255, 255), anchor="ma",
+                      stroke_width=4 * S, stroke_fill=(0, 0, 0, 220))
+            y += line_height
+        y += 20 * S
+        for line in sub_lines:
+            draw.text((W * S // 2, y), line, font=sub_font, fill=(*accent, 255), anchor="ma",
+                      stroke_width=2 * S, stroke_fill=(0, 0, 0, 200))
+            y += sub_height
+        if extra:
+            draw.text((W * S // 2, y + 10 * S), extra, font=face(BOLD, 28), fill=(255, 255, 255, 240), anchor="ma")
+        draw.text((W * S // 2, H * S - 40 * S), HANDLE, font=face(BOLD, 20), fill=(255, 255, 255, 200), anchor="ms")
+    else:
+        width = W * S - 2 * side
+        pill(draw, side, 48 * S, label, (*accent, 255), (17, 12, 40))
+        draw.text((W * S - side, 48 * S + 22 * S), HANDLE, font=face(BOLD, 22), fill=(255, 255, 255, 230), anchor="rm")
+        title_font, lines, line_height = fit(draw, clean(title).upper(), BOLD, width, 2, 72, 40)
+        sub_text = " · ".join(filter(None, [clean(subtitle), extra]))
+        sub_font, sub_lines, sub_height = fit(draw, sub_text, REGULAR, width, 2, 30, 22)
+        y = H * S - 70 * S - len(sub_lines) * sub_height - 14 * S - len(lines) * line_height
+        draw.rectangle((side, y - 22 * S, side + 120 * S, y - 14 * S), fill=(*accent, 255))
+        for line in lines:
+            shadow_text(draw, (side, y), line, title_font, (255, 255, 255, 255))
+            y += line_height
+        y += 14 * S
+        for line in sub_lines:
+            shadow_text(draw, (side, y), line, sub_font, (*accent, 255), 2)
+            y += sub_height
+    if bg:
+        anchor_x = W * S - side
+        draw.text((anchor_x, H * S - 24 * S), CREDIT[0], font=face(REGULAR, 16), fill=(255, 255, 255, 180), anchor="rs")
+    save(Image.alpha_composite(base, layer), output, (W, H))
+
+
+def card(output, kind, title, subtitle="", stat="", stat_label="", bg=None, layout="left"):
+    if layout in ("bottom", "center"):
+        return card_alt(output, kind, title, subtitle, stat, stat_label, bg, layout)
     label, start, end, accent = KINDS.get(kind, KINDS["news"])
     base = art_background(bg, W * S, H * S, end) if bg else gradient_background(kind)
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
@@ -213,13 +279,15 @@ def main():
     parser.add_argument("--meme", nargs=2, metavar=("TOP", "BOTTOM"))
     parser.add_argument("--focus", type=float, default=0.5, help="0 левый край кадра, 1 правый")
     parser.add_argument("--credit", default="Арт: Supercell", help="подпись источника фона")
+    parser.add_argument("--layout", default="left", choices=["left", "bottom", "center"],
+                        help="left: текст слева, bottom: плашка снизу, center: крупно по центру")
     args = parser.parse_args()
     CREDIT[0] = args.credit[:60]
     FOCUS[0] = min(max(args.focus, 0.0), 1.0)
     if args.meme:
         meme(args.output, *args.meme, bg=args.bg)
     else:
-        card(args.output, args.kind, args.title, args.subtitle, args.stat, args.stat_label, args.bg)
+        card(args.output, args.kind, args.title, args.subtitle, args.stat, args.stat_label, args.bg, args.layout)
 
 
 if __name__ == "__main__":

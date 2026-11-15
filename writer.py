@@ -25,6 +25,7 @@ from pathlib import Path
 
 import art
 import bot
+import styles
 import sources
 
 ROOT = Path(__file__).resolve().parent
@@ -34,7 +35,7 @@ PER_CALL = 5  # Большой ответ Gemini пишет долго, поэт
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODELS = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-flash-lite-latest"]
 OFFICIAL = {"supercell.com", "brawlstars.com", "youtube.com", "inbox.supercell.com"}
-COVER_KINDS = {"tip", "news", "update", "buff", "nerf", "brawler", "poll", "warning", "esports",
+COVER_KINDS = {"guide", "lore", "top", "tip", "news", "update", "buff", "nerf", "brawler", "poll", "warning", "esports",
                "creator", "record", "fun", "meme"}
 BANNED = re.compile(
     r"\b(слив|сливы|сливов|слива|утечк\w*|приватн\w* сервер\w*|чит|читы|читам\w*|читер\w*|взлом\w*|vpn|впн|"
@@ -65,19 +66,10 @@ RULES = """Ты редактор русскоязычного Telegram-кана�
 СВЕЖИЕ ОФИЦИАЛЬНЫЕ СТАТЬИ:
 {articles}
 
-Формат текста поста (HTML Telegram, только теги b, i, blockquote, a). Каждый факт в своей
-цитате, так в Telegram получаются красивые карточки:
-<b>🔥 ЗАГОЛОВОК ЗАГЛАВНЫМИ БУКВАМИ</b>
-<i>Короткая живая подводка в одну строку.</i>
-
-<blockquote><b>⚡ Подзаголовок</b>
-Факт или совет в 1-2 предложения.</blockquote>
-<blockquote><b>🎯 Подзаголовок</b>
-Факт или совет в 1-2 предложения.</blockquote>
-
-💬 Вопрос читателям? Ставь 🔥 или 🗿
-
-#BrawlStars #тема
+Оформление: у каждого поста СВОЙ стиль, он указан в плане выше, следуй ему точно. Читатели школьники:
+пиши живо, с юмором и игровым сленгом (имба, тащить, катка, апнуть), короткими абзацами, с яркими эмодзи
+по смыслу. Разметка HTML Telegram: только теги b, i, u, blockquote, tg-spoiler, a. В конце каждого поста
+призыв поставить реакцию (каждый раз другими словами и эмодзи) и 2-3 хештега: #BrawlStars и по теме.
 
 Эмодзи подбирай по смыслу и не повторяй одни и те же во всех постах.
 Только в постах об обновлениях и изменениях баланса (усиления, ослабления, патч) перед вопросом
@@ -223,6 +215,7 @@ def official_image(url):
 
 
 ART_USED = ROOT / "art_used.json"
+LAST_LAYOUT = [""]
 BACKGROUNDS = {"index": [], "used": []}
 
 
@@ -243,8 +236,10 @@ def draw(path, args, topic=""):
     background = art.pick(topic, BACKGROUNDS["index"], BACKGROUNDS["used"], share)
     extra = []
     if background:
+        layouts = [l for l in ("left", "bottom", "center") if l != LAST_LAYOUT[0]]
+        LAST_LAYOUT[0] = random.choice(layouts)  # Разные макеты обложек, без повтора подряд.
         extra = ["--bg", background["path"], "--focus", f"{random.uniform(0.1, 0.9):.2f}",
-                 "--credit", background.get("credit", "Арт: Supercell")]
+                 "--credit", background.get("credit", "Арт: Supercell"), "--layout", LAST_LAYOUT[0]]
     subprocess.run([sys.executable, str(ROOT / "tools" / "make_cover.py"), str(path), *args, *extra],
                    check=True, capture_output=True, text=True)
 
@@ -267,6 +262,8 @@ def build(item, grounded, stamp, number):
         return None, f"запрещённая тема: {BANNED.search(everything).group(0)}"
     name = f"images/{stamp}-gemini-{number:02d}" + ("-meme" if kind == "meme" else "")
     post = {"text": text}
+    if item.get("style") in styles.STYLES:
+        post["style"] = item["style"]
     if kind == "news":
         source = item.get("source", "")
         if not trusted(source, grounded):
@@ -279,8 +276,10 @@ def build(item, grounded, stamp, number):
                 return None, f"в новости числа, которых нет в статье: {', '.join(made_up[:5])}"
         post.update(source=source, source_name="Supercell" if domain(source) == "supercell.com" else domain(source))
     if kind in ("news", "tip", "poll", "fact", "top", "brawler"):
-        default = {"poll": "poll", "tip": "tip", "fact": "lore", "top": "top", "brawler": "brawler"}.get(kind, "news")
-        post["cover_kind"] = (item.get("cover") or {}).get("kind") or default
+        default = {"poll": "poll", "tip": "tip", "fact": "lore", "top": "top", "brawler": "guide"}.get(kind, "news")
+        post["cover_kind"] = default if kind == "brawler" else (item.get("cover") or {}).get("kind") or default
+        if kind == "brawler":
+            item.setdefault("cover", {})["kind"] = "guide"  # «Новые бойцы» тут неправда: это разбор.
         post["kind"] = kind
         draw(ROOT / f"{name}.png", cover_args(item.get("cover") or {}), everything)
         post.update(type="photo", image=f"{name}.png")
@@ -358,9 +357,16 @@ def generate(count, posts, inbox, config, only=None):
             poll_rule = "Сделай опрос."
         articles = ARTICLES and "\n\n".join(f"Адрес: {l}\n{t}" for l, t in ARTICLES.items())
         made = [i.get("kind") for i in items if isinstance(i, dict)]
-        _, plan_text = batch_plan(part, poll_rule.startswith("Можно") and "poll" not in made, bool(articles))
+        plan, _ = batch_plan(part, poll_rule.startswith("Можно") and "poll" not in made, bool(articles))
         if only:
-            plan_text = f"1 × {only}"
+            plan = [only] * part
+        recent = [p.get("style") for p in posts[-6:]] + [i.get("style") for i in items if isinstance(i, dict)]
+        lines = []
+        for number, kind in enumerate(plan, 1):
+            style = styles.pick_style(kind, recent)
+            recent.append(style)
+            lines.append(f"\n{number}. kind={kind}, style={style}: {styles.style_prompt(style)}")
+        plan_text = "".join(lines) + "\nВ ответе у каждого поста укажи поле \"style\"."
         prompt = RULES.format(count=part, date=today, plan=plan_text, articles=articles or "нет",
                               recent=(recent_topics(posts, inbox) + done) or "- пока ничего")
         if only:
@@ -467,9 +473,9 @@ def art_albums(count, posts):
             continue
         title = clean_title(frames[0]["title"])
         url = f"https://www.youtube.com/watch?v={video}"
-        text = (f"<b>🎨 АРТЫ ДНЯ</b>\n<i>Кадры из мультфильма «{html.escape(title, quote=False)}»</i>\n\n"
+        text = (f"<b>{styles.pick(styles.ART_HEADS)}</b>\n<i>Кадры из мультфильма «{html.escape(title, quote=False)}»</i>\n\n"
                 f'▶️ <a href="{url}">Смотреть мультфильм целиком</a>\n\n'
-                "Какой кадр лучший? Ставь 🔥\n\n#BrawlStars #арт")
+                f"{styles.pick(styles.ART_CTAS)}\n\n#BrawlStars #арт")
         images = [f"https://i.ytimg.com/vi/{video}/maxres{f['id'].rsplit('-', 1)[1]}.jpg"
                   for f in sorted(frames, key=lambda f: f["id"])]
         albums.append({"type": "album", "images": images, "text": text, "kind": "art", "album_video": video,

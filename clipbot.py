@@ -29,7 +29,10 @@ PROMPT = """Это видео по игре Brawl Stars. Найди {count} са
 моменты не пересекаются. Время в секундах от начала видео (длина видео {duration} секунд).
 Без моментов с оскорблениями, политикой, 18+ и личными данными.
 Ответь только JSON-массивом от самого смешного к менее смешному:
-[{{"start": секунда начала, "end": секунда конца, "title": "смешная подпись по-русски до 80 символов"}}]"""
+[{{"start": секунда начала, "end": секунда конца,
+  "title": "яркий заголовок момента по-русски до 70 символов, как в мем-пабликах для школьников",
+  "joke": "смешная реплика-комментарий к моменту до 100 символов: от лица бойца, игрока или тиммейта,
+           с игровым сленгом; не повторяй заголовок"}}]"""
 
 
 def tg(method, **payload):
@@ -120,9 +123,9 @@ def clean_moments(raw, count, length):
             continue
         if end - start > 60:
             end = start + 60
-        if any(start < e and end > s for s, e, _ in chosen):
+        if any(start < e and end > s for s, e, *_ in chosen):
             continue
-        chosen.append((start, end, str(item.get("title") or "Смешной момент")[:80]))
+        chosen.append((start, end, str(item.get("title") or "Смешной момент")[:80], str(item.get("joke") or "")[:120]))
         if len(chosen) >= count:
             break
     return chosen
@@ -152,15 +155,16 @@ def main():
                 tg("sendMessage", chat_id=chat, text="Gemini не нашёл подходящих моментов в этом видео 🤷")
                 return
             clips = []
-            for number, (start, end, title) in enumerate(moments, 1):
+            for number, (start, end, title, joke) in enumerate(moments, 1):
                 path = cut(source, start, end, Path(folder) / f"clip{number}.mp4")
-                fields = {"chat_id": chat, "caption": f"Момент {number}: {title} ({stamp(start)}–{stamp(end)})",
+                caption = f"Момент {number}: {title} ({stamp(start)}–{stamp(end)})" + (f"\n💬 {joke}" if joke else "")
+                fields = {"chat_id": chat, "caption": caption,
                           "supports_streaming": "true", "reply_markup": json.dumps({"inline_keyboard": [[
                               {"text": f"➕ {number} в очередь", "callback_data": f"ca:{batch}:{number}"},
                               {"text": "⏭ Следующим", "callback_data": f"cn:{batch}:{number}"},
                               {"text": "🚀 Сейчас", "callback_data": f"cp:{batch}:{number}"}]]})}
                 sent = bot.send_file(os.environ["TELEGRAM_BOT_TOKEN"], "sendVideo", fields, "video", path)
-                clips.append({"n": number, "file_id": sent["result"]["video"]["file_id"], "title": title})
+                clips.append({"n": number, "file_id": sent["result"]["video"]["file_id"], "title": title, "joke": joke})
             bot.write_json(BATCH, {"batch": batch, "clips": clips})
             tg("sendMessage", chat_id=chat, text=(
                 f"Готово: {len(clips)} нарезок. Напиши, какие добавить в очередь, например «добавь 1 3» "

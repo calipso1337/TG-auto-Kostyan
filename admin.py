@@ -515,9 +515,10 @@ class Admin:
         refresh()
         batch = bot.read_json(BATCH, {})
         clips = [c for c in batch.get("clips", []) if not numbers or c["n"] in numbers]
+        import styles
+
         return [{"type": "video", "video": "tg:" + c["file_id"], "kind": "meme",
-                 "text": (f"<b>😂 МОМЕНТ ДНЯ</b>\n<i>{html.escape(c['title'], quote=False)}</i>\n\n"
-                          "Ставь 😂 если зашло\n\n#BrawlStars #мем")} for c in clips]
+                 "text": styles.meme_text(c["title"], c.get("joke", ""))} for c in clips]
 
     def add_clips(self, chat, where, numbers):
         posts_to_add = self.clip_posts(numbers)

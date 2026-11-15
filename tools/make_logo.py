@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Логотип канала @All_About_Brawl: оригинальный, без персонажей и логотипов Supercell.
 
-python3 tools/make_logo.py branding/   рисует варианты logo-star.png, logo-shield.png, logo-neon.png
+python3 tools/make_logo.py branding/   рисует logo-gold.png, logo-cyber.png, logo-pop.png (1024×1024)
 
-Аватарка Telegram круглая, поэтому всё важное держится внутри круга.
-Шрифты Russo One и Bungee (лицензия SIL OFL) лежат в tools/assets.
+Аватарка Telegram круглая, поэтому всё важное держится внутри круга. Рисуем в 2048 px и
+уменьшаем: края получаются гладкими. Шрифты Unbounded и Exo 2 (лицензия SIL OFL) в tools/assets.
 """
 import math
 import random
@@ -14,186 +14,220 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ASSETS = Path(__file__).resolve().parent / "assets"
-RUSSO = str(ASSETS / "RussoOne-Regular.ttf")
-BUNGEE = str(ASSETS / "Bungee-Regular.ttf")
-SIZE = 1024
-INK = (24, 10, 48)
-YELLOW = (255, 214, 10)
-ORANGE = (255, 140, 26)
+S = 2048  # Рабочий размер; на выходе 1024.
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+def font(name, size, weight="Black"):
+    face = ImageFont.truetype(str(ASSETS / name), size)
+    try:
+        face.set_variation_by_name(weight)
+    except (OSError, ValueError):
+        pass
+    return face
 
 
-def radial(size, inner, outer, center=(0.5, 0.45)):
-    """Радиальный градиент от inner в центре к outer по краям."""
-    mask = Image.new("L", (size, size))
-    cx, cy = size * center[0], size * center[1]
-    reach = math.hypot(max(cx, size - cx), max(cy, size - cy))
-    pixels = mask.load()
-    for y in range(size):
-        for x in range(size):
-            pixels[x, y] = min(255, int(255 * math.hypot(x - cx, y - cy) / reach))
-    return Image.composite(Image.new("RGB", (size, size), outer), Image.new("RGB", (size, size), inner), mask)
+def gradient(colors, angle=90, size=S):
+    """Линейный градиент по нескольким цветам под углом (градусы, 90 = сверху вниз)."""
+    line = Image.new("RGB", (512, 1))
+    stops = len(colors) - 1
+    for x in range(512):
+        t = x / 511 * stops
+        i = min(int(t), stops - 1)
+        f = t - i
+        a, b = colors[i], colors[i + 1]
+        line.putpixel((x, 0), tuple(int(a[k] + (b[k] - a[k]) * f) for k in range(3)))
+    big = line.resize((int(size * 1.5), int(size * 1.5)), Image.BILINEAR).rotate(-angle, Image.BICUBIC)
+    off = (big.width - size) // 2
+    return big.crop((off, off, off + size, off + size)).convert("RGBA")
 
 
-def rays(size, count, color, alpha, center=(0.5, 0.45)):
-    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    cx, cy = size * center[0], size * center[1]
-    for i in range(count):
-        a = 2 * math.pi * i / count
-        width = math.pi / count * 0.55
-        far = size * 1.2
-        draw.polygon([(cx, cy), (cx + far * math.cos(a - width), cy + far * math.sin(a - width)),
-                      (cx + far * math.cos(a + width), cy + far * math.sin(a + width))], fill=(*color, alpha))
-    return layer
+def radial_glow(base, center, radius, color, alpha):
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    cx, cy = center
+    ImageDraw.Draw(layer).ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(*color, alpha))
+    base.alpha_composite(layer.filter(ImageFilter.GaussianBlur(radius * 0.6)))
+
+
+def mask_of(draw_fn):
+    mask = Image.new("L", (S, S), 0)
+    draw_fn(ImageDraw.Draw(mask))
+    return mask
+
+
+def paint(base, mask, fill):
+    """Заливает маску цветом или картинкой-градиентом."""
+    layer = fill if isinstance(fill, Image.Image) else Image.new("RGBA", (S, S), (*fill, 255))
+    base.paste(layer, (0, 0), mask)
+
+
+def shadow(base, mask, offset=(0, 40), blur=60, color=(0, 0, 0), alpha=150):
+    soft = Image.new("RGBA", (S, S), (*color, 0))
+    shifted = ImageChops.offset(mask, *offset).point(lambda v: v * alpha // 255)
+    soft.putalpha(shifted.filter(ImageFilter.GaussianBlur(blur)))
+    base.alpha_composite(soft)
 
 
 def star_points(cx, cy, outer, inner, rotation=-90, points=5):
-    result = []
+    out = []
     for i in range(points * 2):
-        radius = outer if i % 2 == 0 else inner
-        angle = math.radians(rotation + i * 180 / points)
-        result.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
-    return result
+        r = outer if i % 2 == 0 else inner
+        a = math.radians(rotation + i * 180 / points)
+        out.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return out
+
+
+def faceted_star(base, cx, cy, outer, inner, light, mid, dark):
+    """Гранёная звезда: каждый луч из светлой и тёмной половинки, как кристалл."""
+    points = star_points(cx, cy, outer, inner)
+    shadow(base, mask_of(lambda d: d.polygon(points, fill=255)), (0, 50), 70, (0, 0, 0), 170)
+    draw = ImageDraw.Draw(base)
+    for i in range(10):
+        a, b = points[i], points[(i + 1) % 10]
+        draw.polygon([(cx, cy), a, b], fill=(*(light if i % 2 == 0 else dark), 255))
+    # Тонкая светлая кромка и блик сверху.
+    draw.line(points + [points[0]], fill=(*mid, 255), width=10, joint="curve")
+    shine = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+    top = mask_of(lambda d: d.polygon(points, fill=255))
+    cut = mask_of(lambda d: d.rectangle((0, 0, S, cy - outer * 0.15), fill=60))
+    shine.putalpha(ImageChops.multiply(top, cut))
+    base.alpha_composite(shine)
+    return points
 
 
 def bolt_points(cx, cy, scale):
-    shape = [(0.10, -0.50), (-0.28, 0.06), (-0.02, 0.06), (-0.14, 0.50), (0.30, -0.10), (0.04, -0.10), (0.18, -0.50)]
+    shape = [(0.12, -0.50), (-0.26, 0.05), (-0.02, 0.05), (-0.14, 0.50), (0.28, -0.08), (0.04, -0.08), (0.20, -0.50)]
     return [(cx + x * scale, cy + y * scale) for x, y in shape]
 
 
-def outlined_polygon(base, points, fill, outline=INK, width=26, shadow=(18, 22)):
-    """Многоугольник с толстой обводкой и сдвинутой тенью, как у игровых значков."""
-    draw = ImageDraw.Draw(base)
-    sx, sy = shadow
-    draw.polygon([(x + sx, y + sy) for x, y in points], fill=(*INK, 160))
-    draw.line(points + [points[0]], fill=outline, width=width * 2, joint="curve")
-    draw.polygon(points, fill=fill)
-
-
-def glossy(base, points, top_alpha=90):
-    """Блик на верхней половине фигуры."""
-    mask = Image.new("L", base.size)
-    ImageDraw.Draw(mask).polygon(points, fill=255)
-    ys = [y for _, y in points]
-    middle = (min(ys) + max(ys)) / 2
-    cut = Image.new("L", base.size)
-    ImageDraw.Draw(cut).rectangle((0, 0, base.size[0], middle), fill=top_alpha)
-    shine = Image.new("RGBA", base.size, (255, 255, 255, 0))
-    shine.putalpha(ImageChops.multiply(mask, cut))
+def faceted_bolt(base, cx, cy, scale, light, dark, glow=None):
+    points = bolt_points(cx, cy, scale)
+    mask = mask_of(lambda d: d.polygon(points, fill=255))
+    if glow:
+        halo = Image.new("RGBA", (S, S), (*glow, 0))
+        halo.putalpha(mask.filter(ImageFilter.GaussianBlur(70)))
+        base.alpha_composite(halo)
+        base.alpha_composite(halo)
+    shadow(base, mask, (0, 40), 50, (0, 0, 0), 140)
+    paint(base, mask, gradient([light, dark], 120))
+    # Светлая грань по левой половине молнии.
+    facet = mask_of(lambda d: d.polygon([points[0], points[1], points[2], (cx, cy - 0.08 * scale)], fill=110))
+    shine = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+    shine.putalpha(ImageChops.multiply(mask, facet))
     base.alpha_composite(shine)
+    return points
 
 
-def text_3d(base, xy, text, face, fill, outline=INK, stroke=14, depth=10, anchor="mm"):
-    draw = ImageDraw.Draw(base)
-    x, y = xy
-    for d in range(depth, 0, -1):
-        draw.text((x + d, y + d), text, font=face, fill=outline, anchor=anchor, stroke_width=stroke, stroke_fill=outline)
-    draw.text((x, y), text, font=face, fill=fill, anchor=anchor, stroke_width=stroke, stroke_fill=outline)
+def text_fill(base, xy, text, face, fill, anchor="mm", tracking=0, shadow_alpha=140):
+    """Текст с градиентной или цветной заливкой, мягкой тенью и разрядкой букв."""
+    mask = Image.new("L", (S, S), 0)
+    draw = ImageDraw.Draw(mask)
+    if tracking:
+        widths = [draw.textlength(ch, font=face) for ch in text]
+        total = sum(widths) + tracking * (len(text) - 1)
+        x = xy[0] - total / 2
+        for ch, w in zip(text, widths):
+            draw.text((x, xy[1]), ch, font=face, fill=255, anchor="lm")
+            x += w + tracking
+    else:
+        draw.text(xy, text, font=face, fill=255, anchor=anchor)
+    if shadow_alpha:
+        shadow(base, mask, (0, 22), 30, (0, 0, 0), shadow_alpha)
+    paint(base, mask, fill)
 
 
-def sparkles(base, count, color, seed, box):
+def dust(base, count, color, seed, box, size=(4, 10), alpha=(80, 200)):
     rng = random.Random(seed)
     draw = ImageDraw.Draw(base)
     for _ in range(count):
         x, y = rng.uniform(box[0], box[2]), rng.uniform(box[1], box[3])
-        r = rng.uniform(10, 26)
-        draw.polygon(star_points(x, y, r, r * 0.3, rotation=rng.uniform(0, 90), points=4), fill=(*color, 230))
+        r = rng.uniform(*size)
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=(*color, int(rng.uniform(*alpha))))
 
 
-def ribbon(base, cy, text, fill, ink=INK, width=560, height=118):
-    draw = ImageDraw.Draw(base)
-    cx = SIZE / 2
-    left, right = cx - width / 2, cx + width / 2
-    top, bottom = cy - height / 2, cy + height / 2
-    tail = 46
-    for side in (-1, 1):  # Хвосты ленты.
-        x = left if side < 0 else right
-        draw.polygon([(x, top + 22), (x + side * (tail + 40), top + 22), (x + side * 40, cy + 30),
-                      (x + side * (tail + 40), bottom + 22), (x, bottom + 22)], fill=(*ink, 255))
-    draw.rounded_rectangle((left + 10, top + 14, right + 10, bottom + 14), radius=26, fill=(*ink, 200))
-    draw.rounded_rectangle((left, top, right, bottom), radius=26, fill=(*fill, 255), outline=ink, width=12)
-    draw.text((cx, cy + 4), text, font=font(RUSSO, 76), fill=(255, 255, 255), anchor="mm",
-              stroke_width=8, stroke_fill=ink)
+def sparkle(base, x, y, r, color=(255, 255, 255)):
+    layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).polygon(star_points(x, y, r, r * 0.18, rotation=-90, points=4), fill=(*color, 255))
+    base.alpha_composite(layer.filter(ImageFilter.GaussianBlur(r * 0.25)))
+    base.alpha_composite(layer)
 
 
-def logo_star():
-    base = radial(SIZE, (190, 38, 224), (46, 8, 92)).convert("RGBA")
-    base.alpha_composite(rays(SIZE, 18, (255, 255, 255), 26))
-    points = star_points(SIZE / 2, SIZE * 0.47, 370, 176)
-    outlined_polygon(base, points, YELLOW)
-    inner = star_points(SIZE / 2, SIZE * 0.47, 305, 145)
-    ImageDraw.Draw(base).polygon(inner, fill=ORANGE)
-    ImageDraw.Draw(base).polygon(star_points(SIZE / 2, SIZE * 0.46, 292, 138), fill=YELLOW)
-    glossy(base, points, 70)
-    sparkles(base, 7, (255, 255, 255), 3, (80, 80, SIZE - 80, SIZE * 0.6))  # До текста: не перекрывают буквы.
-    text_3d(base, (SIZE / 2 - 6, SIZE * 0.49), "AB", font(BUNGEE, 280), (255, 255, 255), stroke=16, depth=12)
-    ribbon(base, SIZE * 0.80, "НОВОСТИ", (236, 32, 112))
+# ---------- Варианты ----------
+
+
+def logo_gold():
+    """Премиум: глубокий ночной синий, гранёная золотая звезда, белое BRAWL."""
+    base = gradient([(10, 14, 40), (22, 32, 92), (8, 10, 30)], 90)
+    radial_glow(base, (S / 2, S * 0.40), S * 0.42, (70, 100, 255), 120)
+    radial_glow(base, (S / 2, S * 0.40), S * 0.22, (255, 190, 60), 60)
+    dust(base, 90, (255, 255, 255), 4, (120, 120, S - 120, S - 120), (2, 6), (40, 160))
+    ring = mask_of(lambda d: d.ellipse((90, 90, S - 90, S - 90), outline=255, width=14))
+    paint(base, ring, gradient([(255, 226, 140), (196, 132, 30), (255, 226, 140)], 45))
+    faceted_star(base, S / 2, S * 0.40, 560, 235, (255, 214, 92), (255, 236, 170), (214, 140, 20))
+    sparkle(base, S * 0.70, S * 0.20, 60)
+    text_fill(base, (S / 2, S * 0.705), "ALL ABOUT", font("Unbounded.ttf", 80, "SemiBold"), (255, 214, 120),
+              tracking=24, shadow_alpha=0)
+    text_fill(base, (S / 2, S * 0.785), "BRAWL", font("Unbounded.ttf", 205, "Black"),
+              gradient([(255, 255, 255), (214, 222, 255)], 90))
     return base
 
 
-def shield_points(cx, top, width, height):
-    half = width / 2
-    return [(cx - half, top + 40), (cx, top), (cx + half, top + 40), (cx + half, top + height * 0.48),
-            (cx + half * 0.72, top + height * 0.78), (cx, top + height), (cx - half * 0.72, top + height * 0.78),
-            (cx - half, top + height * 0.48)]
+def hexagon(cx, cy, r, rotation=0):
+    return [(cx + r * math.cos(math.radians(rotation + 60 * i)), cy + r * math.sin(math.radians(rotation + 60 * i)))
+            for i in range(6)]
 
 
-def logo_shield():
-    base = radial(SIZE, (20, 110, 255), (6, 18, 70)).convert("RGBA")
-    base.alpha_composite(rays(SIZE, 24, (120, 200, 255), 22, center=(0.5, 0.5)))
-    outer = shield_points(SIZE / 2, 150, 620, 760)
-    outlined_polygon(base, outer, (255, 214, 10))
-    inner = shield_points(SIZE / 2, 194, 530, 656)
-    ImageDraw.Draw(base).polygon(inner, fill=(124, 44, 236))
-    stripe = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    ImageDraw.Draw(stripe).polygon([(SIZE / 2, 194), (SIZE / 2 + 265, 234), (SIZE / 2 + 265, 508),
-                                    (SIZE / 2, 850)], fill=(255, 255, 255, 34))
-    base.alpha_composite(stripe)
-    bolt = bolt_points(SIZE / 2, SIZE * 0.42, 380)
-    outlined_polygon(base, bolt, (255, 236, 64), width=14, shadow=(12, 14))
-    glossy(base, bolt, 80)
-    sparkles(base, 6, (255, 255, 255), 7, (100, 100, SIZE - 100, SIZE * 0.5))
-    text_3d(base, (SIZE / 2, SIZE * 0.68), "ВСЁ О", font(RUSSO, 70), (255, 255, 255), stroke=10, depth=6)
-    text_3d(base, (SIZE / 2, SIZE * 0.765), "BRAWL", font(BUNGEE, 104), YELLOW, stroke=12, depth=8)
+def logo_cyber():
+    """Киберспорт: тёмно-фиолетовый фон, циан и маджента, гранёная молния в шестиугольнике."""
+    base = gradient([(16, 6, 38), (34, 10, 72), (10, 4, 26)], 135)
+    radial_glow(base, (S * 0.28, S * 0.30), S * 0.30, (0, 220, 255), 110)
+    radial_glow(base, (S * 0.76, S * 0.68), S * 0.30, (255, 40, 170), 110)
+    grid = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(grid)
+    for k in range(0, S, 96):
+        gd.line((k, 0, k, S), fill=(255, 255, 255, 10), width=2)
+        gd.line((0, k, S, k), fill=(255, 255, 255, 10), width=2)
+    base.alpha_composite(grid)
+    hexa = hexagon(S / 2, S * 0.42, 560, 30)
+    shadow(base, mask_of(lambda d: d.polygon(hexa, fill=255)), (0, 40), 70, (0, 0, 0), 150)
+    paint(base, mask_of(lambda d: d.polygon(hexa, fill=255)), gradient([(24, 12, 60), (44, 16, 92)], 90))
+    stroke = mask_of(lambda d: d.line(hexa + [hexa[0]], fill=255, width=26, joint="curve"))
+    glow = Image.new("RGBA", (S, S), (120, 200, 255, 0))
+    glow.putalpha(stroke.filter(ImageFilter.GaussianBlur(30)))
+    base.alpha_composite(glow)
+    paint(base, stroke, gradient([(0, 230, 255), (150, 90, 255), (255, 40, 170)], 45))
+    faceted_bolt(base, S / 2, S * 0.42, 740, (255, 240, 120), (255, 170, 0), glow=(255, 200, 40))
+    text_fill(base, (S / 2, S * 0.80), "BRAWL", font("Exo2.ttf", 300, "Black"),
+              gradient([(0, 230, 255), (170, 110, 255), (255, 60, 180)], 0))
+    text_fill(base, (S / 2, S * 0.885), "NEWS · ГАЙДЫ · МЕМЫ", font("Exo2.ttf", 74, "Bold"), (210, 220, 255),
+              tracking=10, shadow_alpha=0)
     return base
 
 
-def logo_neon():
-    base = radial(SIZE, (40, 12, 70), (6, 2, 16)).convert("RGBA")
-    ring = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    ImageDraw.Draw(ring).ellipse((92, 92, SIZE - 92, SIZE - 92), outline=(255, 46, 160, 255), width=22)
-    glow = ring.filter(ImageFilter.GaussianBlur(26))
-    base.alpha_composite(glow)
-    base.alpha_composite(glow)
-    base.alpha_composite(ring)
-    bolt = bolt_points(SIZE / 2, SIZE * 0.40, 470)
-    neon = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    ImageDraw.Draw(neon).polygon(bolt, fill=(255, 226, 40, 255))
-    halo = neon.filter(ImageFilter.GaussianBlur(34))
-    base.alpha_composite(halo)
-    base.alpha_composite(halo)
-    base.alpha_composite(neon)
-    # Светлая сердцевина неоновой трубки: та же молния, только тонкая линия внутри.
-    ImageDraw.Draw(base).line(bolt + [bolt[0]], fill=(255, 252, 220, 255), width=10, joint="curve")
-    sparkles(base, 9, (120, 230, 255), 11, (150, 150, SIZE - 150, SIZE * 0.62))
-    for text, y, size, color in (("ALL ABOUT", 0.70, 82, (120, 230, 255)), ("BRAWL", 0.80, 132, (255, 70, 180))):
-        layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
-        ImageDraw.Draw(layer).text((SIZE / 2, SIZE * y), text, font=font(BUNGEE, size), fill=(*color, 255), anchor="mm")
-        base.alpha_composite(layer.filter(ImageFilter.GaussianBlur(14)))
-        base.alpha_composite(layer)
+def logo_pop():
+    """Современная иконка: сочный градиент, крупная белая монограмма AB со звёздочкой."""
+    base = gradient([(255, 70, 120), (140, 50, 245), (40, 170, 255)], 135)
+    radial_glow(base, (S * 0.25, S * 0.20), S * 0.35, (255, 200, 120), 120)
+    radial_glow(base, (S * 0.80, S * 0.85), S * 0.35, (20, 40, 160), 140)
+    glass = mask_of(lambda d: d.ellipse((S * 0.17, S * 0.17, S * 0.83, S * 0.83), fill=255))
+    pane = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+    pane.putalpha(glass.point(lambda v: v * 34 // 255))
+    base.alpha_composite(pane)
+    rim = mask_of(lambda d: d.ellipse((S * 0.17, S * 0.17, S * 0.83, S * 0.83), outline=255, width=8))
+    paint(base, rim, (255, 255, 255))
+    text_fill(base, (S / 2, S * 0.48), "AB", font("Unbounded.ttf", 540, "Black"),
+              gradient([(255, 255, 255), (236, 230, 255)], 90), shadow_alpha=170)
+    faceted_star(base, S * 0.735, S * 0.30, 150, 64, (255, 222, 90), (255, 244, 190), (240, 150, 20))
+    text_fill(base, (S / 2, S * 0.775), "ALL ABOUT BRAWL", font("Unbounded.ttf", 66, "Bold"), (255, 255, 255),
+              tracking=12, shadow_alpha=90)
     return base
 
 
 def main():
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "branding")
     out.mkdir(parents=True, exist_ok=True)
-    for name, make in (("star", logo_star), ("shield", logo_shield), ("neon", logo_neon)):
-        make().convert("RGB").save(out / f"logo-{name}.png", optimize=True)
-        print(f"{out / f'logo-{name}.png'}")
+    for name, make in (("gold", logo_gold), ("cyber", logo_cyber), ("pop", logo_pop)):
+        make().convert("RGB").resize((1024, 1024), Image.LANCZOS).save(out / f"logo-{name}.png", optimize=True)
+        print(out / f"logo-{name}.png")
 
 
 if __name__ == "__main__":

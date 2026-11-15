@@ -29,7 +29,7 @@ import styles
 import sources
 
 ROOT = Path(__file__).resolve().parent
-TARGET = 14
+TARGET = 20  # Посты выходят каждый час, поэтому запас больше.
 MAX_PER_RUN = 10
 PER_CALL = 5  # Большой ответ Gemini пишет долго, поэтому просим порциями.
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -125,8 +125,23 @@ def poll_allowed(posts):
     return not any(post.get("type") == "poll" for post in posts[-POLL_EVERY:])
 
 
+def similar(a, b):
+    """Похожие заголовки: больше 60% общих слов (без эмодзи и мелких слов)."""
+    def words(text):
+        return {w for w in re.findall(r"[a-zа-яё0-9]{3,}", (text or "").lower())}
+    x, y = words(a), words(b)
+    return bool(x and y) and len(x & y) / min(len(x), len(y)) > 0.6
+
+
+def duplicate(item, posts):
+    """Gemini повторил тему, которая уже была или уже стоит в очереди."""
+    title = headline(item.get("text") or item.get("question"))
+    return next((headline(p.get("text") or p.get("question")) for p in posts[-300:]
+                 if similar(title, headline(p.get("text") or p.get("question")))), None)
+
+
 def recent_topics(posts, inbox):
-    topics = [headline(p.get("text") or p.get("question")) for p in posts[-40:]]
+    topics = [headline(p.get("text") or p.get("question")) for p in posts[-80:]]
     topics += [headline(item["post"].get("text")) for item in inbox]
     return "\n".join(f"- {topic}" for topic in topics if topic)
 
@@ -410,6 +425,10 @@ def build_all(items, grounded, config, tag="gemini", posts=(), only_poll=False):
             continue
         if item.get("kind") == "meme":
             print(f"- пропущен (мемы бот берёт с площадок): {headline(item.get('text'))}")
+            continue
+        twin = duplicate(item, list(posts) + added)
+        if twin:
+            print(f"- пропущен (повтор темы «{twin}»): {headline(item.get('text'))}")
             continue
         if item.get("kind") == "news":
             if item.get("source") in used_sources:

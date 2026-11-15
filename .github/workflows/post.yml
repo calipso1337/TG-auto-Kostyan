@@ -13,7 +13,7 @@ on:
       test:
         description: "Пробный пост из источника прямо сейчас"
         type: choice
-        options: [none, hello, preview, moment, meme, news, video, gemini_tip, gemini_screenshot, gemini_balance, gemini_poll]
+        options: [none, hello, preview, moment, meme, news, video, gemini_tip, gemini_brawler, gemini_fact, gemini_top, gemini_screenshot, gemini_balance, gemini_poll]
         default: none
 
 permissions:
@@ -95,7 +95,7 @@ jobs:
         run: |
           left=$(python3 -c "import json;print(len(json.load(open('queue.json')))-json.load(open('state.json'))['next'])")
           echo "В очереди $left постов"
-          if [ "$left" -lt 6 ] && [ -z "$(gh run list -w write.yml -s in_progress -L 1 --json databaseId -q '.[].databaseId')" ]; then
+          if [ "$left" -lt 8 ] && [ -z "$(gh run list -w write.yml -s in_progress -L 1 --json databaseId -q '.[].databaseId')" ]; then
             gh workflow run write.yml --ref main
           fi
         env:

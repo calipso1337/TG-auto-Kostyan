@@ -168,3 +168,11 @@ def test_balance_tables_take_new_brawlers(monkeypatch, tmp_path):
     assert [p["brawler"] for p in first] == ["Эмбер", "Шелли"] and seen == [[], ["Эмбер"]]
     writer.balance_tables({}, 1)
     assert seen[-1] == ["Эмбер", "Шелли"]
+
+
+def test_duplicate_topics_are_dropped(no_network):
+    posts = [{"text": "<b>🛡️ КАК ПРАВИЛЬНО ТАНКОВАТЬ УРОН</b>"}]
+    item = {**NEWS, "kind": "tip", "text": "<b>💡 Как правильно танковать урон в Brawl Stars</b>"}
+    other = {**NEWS, "kind": "tip", "text": "<b>🎯 Лучшие снайперы сезона</b>"}
+    added = writer.build_all([item, other], set(), {}, posts=posts)
+    assert [writer.headline(p["text"]) for p in added] == ["🎯 Лучшие снайперы сезона"]

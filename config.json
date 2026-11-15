@@ -3,8 +3,8 @@
   "day_start": "09:00",
   "day_end": "22:00",
   "interval_minutes": [
-    90,
-    110
+    55,
+    65
   ],
   "first_post_minutes": [
     5,

@@ -279,3 +279,27 @@ def test_videos_are_rare():
     assert bot.choose(posts, state, [video], MSK, "d", False) == ("video", video)
     assert bot.choose(posts, {**state, "last_auto": "video"}, [video], MSK, "d", False) == ("queue", 0)
     assert bot.choose(posts, {**state, "videos_today": {"d": 1}}, [video], MSK, "d", False) == ("queue", 0)
+
+
+def test_post_key():
+    assert bot.post_key({"video_url": "https://www.youtube.com/watch?v=abcdef12&t=5s"}) == "yt:abcdef12"
+    assert bot.post_key({"source": "https://www.youtube.com/shorts/XyZ123abc"}) == "yt:XyZ123abc"
+    assert bot.post_key({"type": "video", "video": "tg:FILE"}) == "tg:FILE"
+    assert bot.post_key({"text": "<b>🔥 КАК ИГРАТЬ ЗА ШЕЛЛИ!</b>\nтекст"}) == "title:как играть за шелли"
+
+
+def test_duplicates_are_skipped(run, tmp_path):
+    go, server = run
+    posts = [{"type": "text", "text": "<b>Старый пост</b>"}, {"type": "text", "text": "<b>Новый пост</b>"}]
+    (tmp_path / "queue.json").write_text(json.dumps(posts), encoding="utf-8")
+    config = {"timezone_offset_hours": 0, "day_start": "00:00", "day_end": "23:59"}
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    (tmp_path / "inbox.json").write_text("[]")
+    (tmp_path / "state.json").write_text(json.dumps({"next": 0, "next_at": 1, "published": ["title:старый пост"]}))
+    env = {**os.environ, "TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHANNEL": "@channel", "SKIP_FETCH": "1",
+           "TELEGRAM_API_BASE": f"http://127.0.0.1:{server.server_port}"}
+    done = subprocess.run([sys.executable, "bot.py"], cwd=tmp_path, env=env, capture_output=True, text=True)
+    sent = [json.loads(c[2])["text"] for c in server.calls if c[0] == "sendMessage"]
+    assert sent == ["<b>Новый пост</b>"], done.stdout + done.stderr
+    state = json.loads((tmp_path / "state.json").read_text())
+    assert state["next"] == 2 and "title:новый пост" in state["published"]

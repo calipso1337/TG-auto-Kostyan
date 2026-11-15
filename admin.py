@@ -486,6 +486,8 @@ class Admin:
             return self.say(chat, "Этого поста уже нет в очереди.")
         try:
             bot.publish(self.token, self.channel, holder["post"])
+            mutate(lambda posts, state: bot.remember_published(state, holder["post"]) or True,
+                   "Запомнить опубликованный пост")
         except Exception:
             # Не получилось: возвращаем пост на место, чтобы он не потерялся.
             mutate(lambda posts, state: posts.insert(state["next"], holder["post"]) or True,

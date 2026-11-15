@@ -77,6 +77,33 @@ def inspect_markup(text):
     return errors, len("".join(parser.visible))
 
 
+def post_key(post):
+    """Отпечаток поста, чтобы одно и то же не вышло дважды: ролик, файл, статья или заголовок."""
+    url = post.get("video_url") or post.get("source") or ""
+    found = re.search(r"(?:v=|shorts/|youtu\.be/)([\w-]{6,})", url)
+    if found:
+        return "yt:" + found.group(1)
+    for field in ("video", "image"):
+        if str(post.get(field, "")).startswith("tg:"):
+            return "tg:" + post[field][3:]
+    if post.get("type") == "album" and post.get("images"):
+        return "album:" + post["images"][0]
+    text = re.sub(r"<[^>]+>", "", (post.get("text") or post.get("question") or "").split("\n")[0])
+    words = re.sub(r"[^a-zа-яё0-9 ]", "", text.lower()).split()
+    return "title:" + " ".join(words) if words else ""
+
+
+def already_published(state, post):
+    key = post_key(post)
+    return bool(key) and key in state.get("published", [])
+
+
+def remember_published(state, post):
+    key = post_key(post)
+    if key:
+        state["published"] = (state.get("published", []) + [key])[-800:]
+
+
 def full_text(post):
     """Текст поста со строкой источника, которую бот добавляет сам."""
     text = post.get("text", "").strip()
@@ -422,6 +449,7 @@ def test_post(token, channel, kind, config):
     if errors:
         raise ValueError(f"пробный пост не прошёл проверку: {'; '.join(errors)}")
     publish(token, channel, post)
+    # state.json здесь не трогаем: пробный запуск идёт параллельно с цепочкой, и правки конфликтовали бы.
     seen = read_json(SEEN, {})
     if item_id not in seen.get(key, []) and key in seen:
         sources.remember(seen, key, item_id)
@@ -518,6 +546,19 @@ def main():
 
     day = clock(config, moment or time.time()).date().isoformat()
     choice = choose(posts, state, inbox, config, day, manual)
+    for _ in range(30):  # Уже выходило: убираем дубль и берём следующее.
+        if not choice:
+            break
+        candidate = posts[choice[1]] if choice[0] == "queue" else choice[1]["post"]
+        if not already_published(state, candidate):
+            break
+        print(f"Пропускаю повтор: {post_key(candidate)}")
+        if choice[0] == "queue":
+            state["next"] = choice[1] + 1
+        else:
+            inbox.remove(choice[1])
+            write_json(INBOX, inbox)
+        choice = choose(posts, state, inbox, config, day, manual)
     if choice:
         chosen = posts[choice[1]] if choice[0] == "queue" else choice[1]["post"]
         warm_preview(token, channel, chosen)
@@ -537,6 +578,7 @@ def main():
         where, item = choice
         if where == "queue":
             publish(token, channel, posts[item])
+            remember_published(state, posts[item])
             state["next"] = item + 1
             state["last_auto"] = "queue"
             print(f"Опубликован пост {item + 1} из {len(posts)}")
@@ -544,6 +586,7 @@ def main():
             inbox.remove(item)
             write_json(INBOX, inbox)  # Сломанный материал не должен блокировать слот навсегда.
             publish(token, channel, item["post"])
+            remember_published(state, item["post"])
             if where in ("news", "video"):
                 counter = f"{where}s_today" if where == "video" else "news_today"
                 state[counter] = {day: state.get(counter, {}).get(day, 0) + 1}

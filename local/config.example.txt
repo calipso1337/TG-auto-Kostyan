@@ -13,6 +13,15 @@ GITHUB_TOKEN=
 
 REPO=calipso1337/TG-auto-Kostyan
 
+# Вход в YouTube, если он пишет «Sign in to confirm you're not a bot». Программа зайдёт
+# под аккаунтом, который открыт в браузере. Лучше Firefox: из Chrome и Edge на Windows
+# куки часто не читаются. Войди в YouTube в Firefox и оставь строку ниже.
+# Риск: при частых автоматических загрузках Google может ограничить аккаунт, поэтому
+# лучше войти вторым, не основным аккаунтом. Чтобы не входить, поставь # в начале строки.
+COOKIES_BROWSER=firefox
+# Или файл cookies.txt в этой папке (выгрузка расширением «Get cookies.txt LOCALLY»):
+# COOKIES_FILE=cookies.txt
+
 # Сколько фрагментов делать за один запуск
 CLIPS_PER_RUN=2
 

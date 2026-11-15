@@ -65,8 +65,22 @@ def ytdlp_command():
     return [found] if found else [sys.executable, "-m", "yt_dlp"]
 
 
+LOGIN = []  # Вход в YouTube под аккаунтом владельца: --cookies-from-browser или --cookies.
+
+
+def login_args(config):
+    """Если YouTube просит подтвердить, что ты не бот, программа заходит под твоим аккаунтом
+    из браузера (COOKIES_BROWSER) или из файла cookies.txt (COOKIES_FILE)."""
+    if config.get("COOKIES_FILE"):
+        path = Path(config["COOKIES_FILE"])
+        return ["--cookies", str(path if path.is_absolute() else HERE / path)]
+    if config.get("COOKIES_BROWSER"):
+        return ["--cookies-from-browser", config["COOKIES_BROWSER"]]
+    return []
+
+
 def ytdlp(*args, timeout=600):
-    return subprocess.run([*ytdlp_command(), *args], capture_output=True, text=True,
+    return subprocess.run([*ytdlp_command(), *LOGIN, *args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout)
 
 
@@ -98,7 +112,14 @@ def video_info(video_id):
     try:
         return json.loads(done.stdout)
     except ValueError:
-        print(f"  YouTube не отдал данные ролика: {done.stderr.strip()[-200:]}")
+        error = done.stderr.strip()
+        if "not a bot" in error or "cookies" in error:
+            hint = ("YouTube просит войти. Впиши в config.txt строку COOKIES_BROWSER=firefox "
+                    "(и войди в YouTube в Firefox) или COOKIES_FILE=cookies.txt" if not LOGIN else
+                    "Не удалось войти через браузер: закрой браузер и запусти снова, либо используй COOKIES_FILE")
+            print(f"  {hint}")
+        else:
+            print(f"  YouTube не отдал данные ролика: {error[-200:]}")
         return None
 
 
@@ -224,6 +245,9 @@ def save_clip(config, clip):
 
 def main():
     config = load_config()
+    LOGIN[:] = login_args(config)
+    if LOGIN:
+        print("Вход в YouTube: " + ("файл cookies" if "--cookies" in LOGIN else f"браузер {LOGIN[1]}"))
     done = set(json.loads(DONE.read_text(encoding="utf-8"))) if DONE.exists() else set()
     want = int(config.get("CLIPS_PER_RUN", "2"))
     queries = [q.strip() for q in config.get("QUERIES", "мемы бравл старс;смешные моменты бравл старс").split(";")]

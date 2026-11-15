@@ -87,6 +87,9 @@ def search(query, limit=20):
             except ValueError:
                 continue
             rows.append({"id": parts[0], "duration": duration, "title": parts[2]})
+    if not rows:
+        # Ничего не нашлось: показываем, что ответил YouTube, чтобы было понятно почему.
+        print(f"  YouTube ничего не вернул. Ответ yt-dlp: {(done.stderr or done.stdout).strip()[-400:] or 'пусто'}")
     return rows
 
 
@@ -231,12 +234,13 @@ def main():
             if made >= want:
                 break
             print(f"Ищу: {query}")
-            for video in search(query):
+            found = search(query)
+            fresh = [v for v in found if v["id"] not in done and 120 <= v["duration"] <= 1800
+                     and russian(v["title"]) and not BAD.search(v["title"])]
+            print(f"  Найдено роликов: {len(found)}, подходят (русские, 2-30 минут, новые): {len(fresh)}")
+            for video in fresh:
                 if made >= want:
                     break
-                if video["id"] in done or not 120 <= video["duration"] <= 1800 or not russian(video["title"]) \
-                        or BAD.search(video["title"]):
-                    continue
                 done.add(video["id"])
                 print(f"- {video['title']}")
                 info = video_info(video["id"])

@@ -54,8 +54,19 @@ def load_config():
 # ---------- YouTube (yt-dlp) ----------
 
 
+def ytdlp_command():
+    """yt-dlp.exe рядом с программой или в PATH (официальная сборка с GitHub), иначе модуль Python."""
+    import shutil
+
+    local = HERE / "yt-dlp.exe"
+    if local.exists():
+        return [str(local)]
+    found = shutil.which("yt-dlp")
+    return [found] if found else [sys.executable, "-m", "yt_dlp"]
+
+
 def ytdlp(*args, timeout=600):
-    return subprocess.run([sys.executable, "-m", "yt_dlp", *args], capture_output=True, text=True,
+    return subprocess.run([*ytdlp_command(), *args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout)
 
 

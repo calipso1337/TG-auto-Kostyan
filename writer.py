@@ -634,7 +634,7 @@ def main():
     albums += moments
     count = need if only else max(need - len(albums), 1)
     items, grounded = generate(count, posts, inbox, config, only)
-    added = build_all(items[:count], grounded, config, "test" if only else "gemini", posts, only == "poll")
+    added = build_all(items[:count], grounded, config, f"test-{only}" if only else "gemini", posts, only == "poll")
     added += albums
     save_backgrounds()
     if only:

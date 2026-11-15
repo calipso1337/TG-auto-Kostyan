@@ -449,7 +449,9 @@ def warm_preview(token, channel, post):
 
 def choose(posts, state, inbox, config, day, manual):
     """Что публиковать: ("meme"|"news", элемент inbox) или ("queue", номер) или None."""
-    memes = [item for item in inbox if item["kind"] == "meme"]
+    # Настоящие видеофайлы (фрагменты нарезок) раньше мемов-ссылок.
+    memes = sorted((item for item in inbox if item["kind"] == "meme"),
+                   key=lambda item: not str(item.get("post", {}).get("video", "")).startswith("tg:"))
     news = [item for item in inbox if item["kind"] == "news"]
     news_today = state.get("news_today", {}).get(day, 0)
     every = config.get("meme_every", 3)

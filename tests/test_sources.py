@@ -192,3 +192,19 @@ def test_without_reddit_keys_shorts_are_used(monkeypatch):
     assert [item["id"] for item in inbox] == ["s1"]
     assert inbox[0]["post"]["video_url"] == inbox[0]["post"]["source"] == "https://www.youtube.com/shorts/s1"
     assert sources.latest("meme", CONFIG)[1] == "s1"
+
+
+def test_clips_from_owner_program(monkeypatch, tmp_path):
+    clips = tmp_path / "clips.json"
+    clips.write_text(json.dumps([{"id": "abc-120", "file_id": "FILE", "url": "https://www.youtube.com/watch?v=abc&t=120s",
+                                  "channel": "Мемы & приколы", "channel_url": "https://www.youtube.com/channel/UCx",
+                                  "caption": "Самый пересматриваемый момент"}], ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(sources, "CLIPS", clips)
+    inbox, seen = [], {}
+    sources.fetch_clips(CONFIG, inbox, seen, NOW)
+    sources.fetch_clips(CONFIG, inbox, seen, NOW)
+    assert len(inbox) == 1 and inbox[0]["kind"] == "meme"
+    post = inbox[0]["post"]
+    assert post["video"] == "tg:FILE" and "Мемы &amp; приколы" in post["text"] and bot.validate_post(post) == []
+    link = {"kind": "meme", "id": "s", "post": {"type": "text", "text": "x", "video_url": "u", "source": "u"}}
+    assert bot.choose([], {"next": 0, "posted": 2}, [link, inbox[0]], {"meme_every": 3}, "d", False)[1] is inbox[0]

@@ -339,6 +339,35 @@ def meme_candidates(config, seen, per_channel=10):
     return found
 
 
+CLIPS = Path(__file__).resolve().parent / "clips.json"
+
+
+def clip_post(clip):
+    """Пост с видеофайлом, который вырезала программа владельца (local/clipper.py)."""
+    channel = html.escape(clip.get("channel") or "YouTube", quote=False)
+    channel_url = html.escape(clip.get("channel_url") or clip["url"], quote=True)
+    text = (
+        "<b>😂 МЕМ ДНЯ</b>\n"
+        f"<i>{clean(clip.get('caption') or 'Самый пересматриваемый момент', 200)}</i>\n\n"
+        f'🎬 Фрагмент из нарезки <a href="{channel_url}">{channel}</a>\n\n'
+        "Ставь 😂 если зашло\n\n"
+        "#BrawlStars #мем"
+    )
+    return {"type": "video", "video": "tg:" + clip["file_id"], "text": text, "source": clip["url"],
+            "source_name": f"YouTube: {clip.get('channel') or 'нарезка'}", "kind": "meme"}
+
+
+def fetch_clips(config, inbox, seen, now):
+    """Видео-мемы, которые прислала программа владельца: настоящие файлы с плеером в Telegram."""
+    clips = json.loads(CLIPS.read_text(encoding="utf-8")) if CLIPS.exists() else []
+    for clip in clips:
+        if clip["id"] in seen.get("clips", []) or not clip.get("file_id"):
+            continue
+        remember(seen, "clips", clip["id"])
+        add(inbox, "meme", clip["id"], clip_post(clip), now)
+        print(f"Фрагмент: {clip['id']}")
+
+
 def fetch_shorts(config, inbox, seen, now):
     """Видео-мемы без ключей Reddit: русские Shorts мем-каналов (плеером, без скачивания)."""
     stock = sum(1 for item in inbox if item["kind"] == "meme")
@@ -376,8 +405,8 @@ def expire(inbox, now):
 
 def fetch_all(config, inbox, seen, now, validate):
     """Пополняет inbox. Ошибка одного источника не мешает остальным и публикации."""
-    for name, fetch in (("YouTube", fetch_youtube), ("Блог Supercell", fetch_blog), ("Reddit", fetch_memes),
-                        ("Shorts", fetch_shorts)):
+    for name, fetch in (("YouTube", fetch_youtube), ("Блог Supercell", fetch_blog), ("Фрагменты", fetch_clips),
+                        ("Reddit", fetch_memes), ("Shorts", fetch_shorts)):
         before = len(inbox)
         try:
             fetch(config, inbox, seen, now)

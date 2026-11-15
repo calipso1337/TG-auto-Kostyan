@@ -1,0 +1,20 @@
+# Скопируй этот файл в config.txt и заполни. config.txt никому не показывай: там токены.
+
+# Токен бота от @BotFather (тот же, что в секрете TELEGRAM_BOT_TOKEN на GitHub)
+BOT_TOKEN=
+
+# Канал
+CHANNEL=@All_About_Brawl
+
+# Токен GitHub с доступом только к репозиторию бота: Settings -> Developer settings ->
+# Fine-grained tokens -> Generate new token -> Only select repositories -> TG-auto-Kostyan ->
+# Permissions -> Contents: Read and write
+GITHUB_TOKEN=
+
+REPO=calipso1337/TG-auto-Kostyan
+
+# Сколько фрагментов делать за один запуск
+CLIPS_PER_RUN=2
+
+# Что искать на YouTube, через точку с запятой
+QUERIES=мемы бравл старс;смешные моменты бравл старс;бравл старс приколы нарезка

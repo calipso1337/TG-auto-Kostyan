@@ -176,3 +176,10 @@ def test_duplicate_topics_are_dropped(no_network):
     other = {**NEWS, "kind": "tip", "text": "<b>🎯 Лучшие снайперы сезона</b>"}
     added = writer.build_all([item, other], set(), {}, posts=posts)
     assert [writer.headline(p["text"]) for p in added] == ["🎯 Лучшие снайперы сезона"]
+
+
+def test_style_labels_are_removed():
+    assert writer.clean_style_labels("ПЛЮСЫ И МИНУСЫ: <b>Пайпер</b>") == "<b>Пайпер</b>"
+    assert writer.clean_style_labels("КАРТОЧКИ: <b>⚡ ЭЛЬ ПРИМО</b>") == "<b>⚡ ЭЛЬ ПРИМО</b>"
+    assert writer.clean_style_labels("🤯 ЗНАЛ ЛИ ТЫ? <b>Рико</b>") == "<b>🤯 ЗНАЛ ЛИ ТЫ?</b>\n<b>Рико</b>"
+    assert writer.clean_style_labels("<b>🧩 ЗАГАДКА ДНЯ</b>") == "<b>🧩 ЗАГАДКА ДНЯ</b>"

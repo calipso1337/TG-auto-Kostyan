@@ -66,7 +66,8 @@ RULES = """Ты редактор русскоязычного Telegram-кана�
 СВЕЖИЕ ОФИЦИАЛЬНЫЕ СТАТЬИ:
 {articles}
 
-Оформление: у каждого поста СВОЙ стиль, он указан в плане выше, следуй ему точно. Читатели школьники:
+Оформление: у каждого поста СВОЙ стиль, он указан в плане выше, следуй ему точно. Название стиля
+(КАРТОЧКИ, СПИСОК, ПЛЮСЫ И МИНУСЫ, РЕЙТИНГ и т.п.) в текст поста НЕ пиши. Читатели школьники:
 пиши живо, с юмором и игровым сленгом (имба, тащить, катка, апнуть), короткими абзацами, с яркими эмодзи
 по смыслу. Разметка HTML Telegram: только теги b, i, u, blockquote, tg-spoiler, a. В конце каждого поста
 призыв поставить реакцию (каждый раз другими словами и эмодзи) и 2-3 хештега: #BrawlStars и по теме.
@@ -123,6 +124,16 @@ def strip_verdict(text):
 
 def poll_allowed(posts):
     return not any(post.get("type") == "poll" for post in posts[-POLL_EVERY:])
+
+
+STYLE_LABEL = re.compile(r"^\s*(КАРТОЧКИ|СПИСОК|ПЛЮСЫ И МИНУСЫ|РЕЙТИНГ|ИСТОРИЯ|ЗАГАДКА)\s*:\s*", re.IGNORECASE)
+DID_YOU_KNOW = re.compile(r"^\s*(🤯\s*)?ЗНАЛ ЛИ ТЫ\??\s*(?=<b>)", re.IGNORECASE)
+
+
+def clean_style_labels(text):
+    """Убирает название стиля, которое Gemini иногда переписывает из инструкции в начало поста."""
+    text = STYLE_LABEL.sub("", text or "")
+    return DID_YOU_KNOW.sub("<b>🤯 ЗНАЛ ЛИ ТЫ?</b>\n", text)
 
 
 def similar(a, b):
@@ -277,7 +288,7 @@ def cover_args(cover):
 def build(item, grounded, stamp, number):
     """Превращает ответ Gemini в пост для queue.json или возвращает причину отказа."""
     kind = item.get("kind")
-    text = (item.get("text") or "").strip()
+    text = clean_style_labels((item.get("text") or "").strip())
     everything = " ".join(str(item.get(k, "")) for k in ("text", "question", "options", "top", "bottom"))
     if BANNED.search(everything):
         return None, f"запрещённая тема: {BANNED.search(everything).group(0)}"

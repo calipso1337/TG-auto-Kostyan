@@ -233,3 +233,22 @@ def test_add_clips_from_batch(bot_env, monkeypatch):
     assert queue()[1]["video"] == "tg:B"
     robot.handle(press("cn:99:2"))
     assert "устарела" in fake.sent("sendMessage")[-1]["text"]
+
+
+def test_busy_replies_once_without_confirming(bot_env, monkeypatch):
+    robot, fake = bot_env
+    update = {"update_id": 9, "message": {"chat": {"id": OWNER, "type": "private"}, "text": "📋 Очередь"}}
+    original = fake.__call__
+
+    def telegram(token, method, payload):
+        if method == "getUpdates":
+            assert "offset" not in payload  # Не подтверждаем: следующее звено выполнит команду.
+            return {"result": [update]}
+        return original(token, method, payload)
+    monkeypatch.setattr(bot, "call", telegram)
+    monkeypatch.setattr(admin.time, "sleep", lambda s: None)
+    clock = iter([0, 0, 1, 1, 2, 2, 99, 99, 99])
+    monkeypatch.setattr(admin.time, "time", lambda: next(clock))
+    robot.busy(10)
+    busy = [m for m in fake.sent("sendMessage") if "публикую" in m["text"]]
+    assert len(busy) == 1 and busy[0]["chat_id"] == OWNER

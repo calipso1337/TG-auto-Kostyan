@@ -583,6 +583,32 @@ class Admin:
             return self.on_group(message)
         return None
 
+    def busy(self, until):
+        """Пока звено публикует пост: отвечаем владельцу «занят», но не подтверждаем сообщения,
+        чтобы следующее звено выполнило их как обычно."""
+        replied = set()
+        while time.time() < until:
+            wait = int(min(20, max(1, until - time.time())))
+            try:
+                updates = bot.call(self.token, "getUpdates", {"timeout": wait, "allowed_updates": [
+                    "message", "edited_message", "callback_query"]}).get("result", [])
+            except RuntimeError:
+                time.sleep(5)
+                continue
+            for update in updates:
+                body = update.get("message") or (update.get("callback_query") or {}).get("message") or {}
+                chat = body.get("chat", {})
+                if update["update_id"] in replied or chat.get("type") != "private":
+                    continue
+                replied.add(update["update_id"])
+                try:
+                    self.say(chat["id"], "⏳ Сейчас публикую пост. Твоё сообщение выполню через пару минут, "
+                                         "повторять не нужно.")
+                except RuntimeError:
+                    pass
+            if updates:
+                time.sleep(min(3, max(0, until - time.time())))
+
     def run(self, until):
         self.setup()
         offset = None

@@ -517,7 +517,14 @@ def main():
         warm_preview(token, channel, chosen)
     if moment and moment > time.time():
         print(f"Жду {clock(config, moment):%H:%M:%S}: {int(moment - time.time())} с")
-        time.sleep(moment - time.time())
+        try:
+            import admin  # Пока ждём, отвечаем владельцу, что бот занят публикацией.
+
+            admin.Admin(token, channel).busy(moment)
+        except Exception as error:  # noqa: BLE001 - публикация важнее
+            print(f"Ожидание без ответов владельцу: {error}")
+        if moment > time.time():
+            time.sleep(moment - time.time())
     if choice is None:
         print("Публиковать нечего: очередь закончилась, добавь новые посты в queue.json")
     else:
